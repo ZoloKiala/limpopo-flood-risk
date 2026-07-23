@@ -43,6 +43,7 @@ python -m floodrisk build-static   # one-time: downloads ~1 GB, trains the
                                    # susceptibility ViT + SAR ViT
                                    # (~20 min GPU / ~2 h CPU)
 python -m floodrisk daily          # today's product -> outputs/
+python -m floodrisk dashboard      # rebuild dashboard.html from latest bulletin
 ```
 
 Outputs per run:
@@ -51,9 +52,14 @@ Outputs per run:
 |---|---|
 | `outputs/flood_risk_YYYYMMDD.tif` | band 1 risk index 0–1 (forecast × susceptibility, floored by observed SAR water), band 2 static susceptibility, band 3 permanent water, band 4 observed open water now (EPSG:4326, QGIS-ready) |
 | `outputs/now_water_YYYYMMDD.tif` | SAR NOW layer: band 1 P(open water) 0–1, band 2 water mask (only when a Sentinel-1 scene was usable) |
+| `outputs/dashboard.html` | self-contained visual dashboard: alert banner, forecast + risk-area stat tiles, composite risk map (inlined), SAR NOW status, provenance — no external assets, opens from disk / publishable to Pages |
+| `outputs/risk_map_YYYYMMDD.png` | standalone composite map (susceptibility base + risk overlay + permanent/observed water) |
 | `outputs/bulletin_YYYYMMDD.txt` | human-readable bulletin |
 | `outputs/bulletin_YYYYMMDD.json` | machine-readable (feed to dashboards/APIs) |
 | `outputs/ALERT_LEVEL` | `LOW` / `MODERATE` / `HIGH` (for CI alerting steps) |
+
+`daily` writes the dashboard automatically; the standalone `dashboard` command
+just re-renders it from the most recent bulletin JSON (no re-run needed).
 
 ## Deploy on GitHub Actions
 

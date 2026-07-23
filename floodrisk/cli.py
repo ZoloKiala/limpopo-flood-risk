@@ -6,6 +6,7 @@
 """
 import argparse
 import datetime as dt
+import json
 import logging
 import sys
 
@@ -45,8 +46,24 @@ def cmd_daily(args):
     print(text)
     log.info("wrote %s and %s", txt_path, json_path)
 
+    from .dashboard import build_dashboard
+    build_dashboard(payload, config.OUTPUT_DIR)
+
     # Non-zero-ish signal for CI: expose the alert level for downstream steps
     (config.OUTPUT_DIR / "ALERT_LEVEL").write_text(payload["alert_level"])
+
+
+def cmd_dashboard(args):
+    from .dashboard import build_dashboard
+
+    bulletins = sorted(config.OUTPUT_DIR.glob("bulletin_*.json"))
+    if not bulletins:
+        log.error("no bulletin found in %s - run `python -m floodrisk daily`",
+                  config.OUTPUT_DIR)
+        sys.exit(2)
+    payload = json.loads(bulletins[-1].read_text(encoding="utf-8"))
+    out = build_dashboard(payload, config.OUTPUT_DIR)
+    print(out)
 
 
 def cmd_selftest(args):
@@ -98,6 +115,10 @@ def main():
 
     p3 = sub.add_parser("selftest", help="quick sanity check")
     p3.set_defaults(func=cmd_selftest)
+
+    p4 = sub.add_parser("dashboard",
+                        help="rebuild dashboard.html from the latest bulletin")
+    p4.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args()
     args.func(args)
