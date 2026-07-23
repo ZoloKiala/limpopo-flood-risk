@@ -1,0 +1,66 @@
+name: Daily flood risk
+
+on:
+  schedule:
+    - cron: "30 4 * * *"     # 04:30 UTC = 06:30 CAT, before the workday
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  risk:
+    runs-on: ubuntu-latest
+    # Warm-cache daily runs finish in minutes; the ceiling covers a cold first
+    # run that has to build the static products (susceptibility + SAR ViTs).
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore static products (susceptibility + thresholds + SAR model)
+        uses: actions/cache@v4
+        with:
+          path: static
+          key: static-v1-${{ github.run_id }}
+          restore-keys: |
+            static-v1
+
+      - name: Build static products if missing (first run only, ~2 h CPU)
+        run: python -m floodrisk build-static --if-missing
+
+      - name: Produce daily risk product
+        run: python -m floodrisk daily
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat outputs/bulletin_*.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload products (GeoTIFF + bulletin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: flood-risk-${{ github.run_id }}
+          path: outputs/
+          retention-days: 30
+
+      # Optional: notify on HIGH alert. Add a repository secret WEBHOOK_URL
+      # (Slack/Teams incoming webhook) and uncomment.
+      # - name: Alert on HIGH
+      #   if: success()
+      #   run: |
+      #     LEVEL=$(cat outputs/ALERT_LEVEL)
+      #     if [ "$LEVEL" = "HIGH" ]; then
+      #       curl -s -X POST -H 'Content-Type: application/json' \
+      #         -d "{\"text\": \"$(cat outputs/bulletin_*.txt | head -20)\"}" \
+      #         "${{ secrets.WEBHOOK_URL }}"
+      #     fi
