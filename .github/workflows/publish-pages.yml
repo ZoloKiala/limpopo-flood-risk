@@ -1,9 +1,11 @@
 name: Publish dashboard to Pages
 
-# Publishes outputs/dashboard.html to GitHub Pages. Runs after each successful
-# "Daily flood risk" run (so the site tracks the latest bulletin), and can be
-# triggered manually. Reuses the cached static products; builds them if the
-# cache is cold.
+# Publishes a dated archive of dashboards to GitHub Pages. Each run:
+#   * carries forward the days already published (so history accumulates),
+#   * backfills any missing day in the recent window (reconstructing past days
+#     from Open-Meteo's historical-forecast archive + nearest Sentinel-1 scene),
+#   * rebuilds the manifest + index and deploys.
+# Runs after each successful "Daily flood risk" run, and on manual dispatch.
 
 on:
   workflow_dispatch: {}
@@ -19,6 +21,10 @@ permissions:
 concurrency:
   group: pages
   cancel-in-progress: true
+
+env:
+  SITE_URL: https://zolokiala.github.io/limpopo-flood-risk
+  BACKFILL_DAYS: "14"
 
 jobs:
   publish:
@@ -49,14 +55,36 @@ jobs:
       - name: Build static products if missing (cold cache only)
         run: python -m floodrisk build-static --if-missing
 
-      - name: Produce daily product + dashboard
-        run: python -m floodrisk daily
-
-      - name: Assemble site
+      - name: Carry forward already-published days
         run: |
           mkdir -p _site
-          cp outputs/dashboard.html _site/index.html
-          cp outputs/risk_map_*.png _site/ 2>/dev/null || true
+          if curl -sf "$SITE_URL/manifest.json" -o /tmp/manifest.json; then
+            for d in $(python -c "import json;print('\n'.join(json.load(open('/tmp/manifest.json')).get('dates',[])))"); do
+              if curl -sf "$SITE_URL/$d.html" -o "_site/$d.html"; then
+                echo "carried forward $d"
+              else
+                rm -f "_site/$d.html"
+              fi
+            done
+          else
+            echo "no existing site yet (first run) - everything will be backfilled"
+          fi
+
+      - name: Backfill missing days in the recent window
+        run: |
+          TOMORROW=$(date -u -d "tomorrow" +%Y-%m-%d)
+          for i in $(seq 0 "$BACKFILL_DAYS"); do
+            D=$(date -u -d "$TOMORROW -${i} days" +%Y-%m-%d)
+            if [ -f "_site/$D.html" ]; then
+              echo "have $D"
+            else
+              echo "building $D"
+              python -m floodrisk daily --for "$D" || echo "  (skipped $D - source unavailable)"
+            fi
+          done
+
+      - name: Assemble site (snapshots + manifest + index)
+        run: python -m floodrisk build-site --site _site
 
       - uses: actions/upload-pages-artifact@v3
         with:

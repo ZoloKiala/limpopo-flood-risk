@@ -9,6 +9,7 @@ import datetime as dt
 import json
 import logging
 import sys
+from pathlib import Path
 
 from . import config
 
@@ -28,17 +29,22 @@ def cmd_daily(args):
     from .fuse import compute_rain_factor, fuse, load_thresholds
     from .observation import latest_water_extent
 
-    issue = dt.datetime.now(dt.timezone.utc)
-    valid = issue + dt.timedelta(days=1)
+    if getattr(args, "for_date", None):
+        valid = dt.datetime.strptime(args.for_date, "%Y-%m-%d").replace(
+            tzinfo=dt.timezone.utc)
+        issue = valid - dt.timedelta(days=1)
+    else:
+        issue = dt.datetime.now(dt.timezone.utc)
+        valid = issue + dt.timedelta(days=1)
 
     if not (config.STATIC_DIR / "susceptibility.tif").exists():
         log.error("static products missing - run `python -m floodrisk build-static`")
         sys.exit(2)
 
     thresholds = load_thresholds()
-    forecast = get_forecast()
+    forecast = get_forecast(valid_date=valid.date())
     rain_factor = compute_rain_factor(forecast, thresholds)
-    observation = latest_water_extent(issue)          # SAR NOW layer (or None)
+    observation = latest_water_extent(valid)          # SAR NOW layer (or None)
     stats = fuse(rain_factor, valid, observation=observation)
 
     text, payload = bl.build(issue, valid, forecast, thresholds, stats, observation)
@@ -64,6 +70,39 @@ def cmd_dashboard(args):
     payload = json.loads(bulletins[-1].read_text(encoding="utf-8"))
     out = build_dashboard(payload, config.OUTPUT_DIR)
     print(out)
+
+
+def cmd_build_site(args):
+    """Assemble a static site: one dated snapshot per bulletin + manifest + index.
+
+    Renders a nav-enabled snapshot for every bulletin JSON in outputs/ (their
+    GeoTIFFs must be present), preserving any snapshots already in the site dir
+    (e.g. earlier days carried forward from a previous deploy).
+    """
+    from .dashboard import build_dashboard
+
+    site = Path(args.site)
+    site.mkdir(parents=True, exist_ok=True)
+    for jf in sorted(config.OUTPUT_DIR.glob("bulletin_*.json")):
+        payload = json.loads(jf.read_text(encoding="utf-8"))
+        build_dashboard(payload, site, nav=True,
+                        out_name=f"{payload['valid']}.html", write_png=False)
+
+    dates = sorted(p.stem for p in site.glob("*.html") if p.stem != "index")
+    if not dates:
+        log.error("no snapshots in %s", site)
+        sys.exit(2)
+    latest = dates[-1]
+    (site / "manifest.json").write_text(
+        json.dumps({"dates": dates, "latest": latest}), encoding="utf-8")
+    (site / "index.html").write_text(
+        '<!doctype html><meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0; url={latest}.html">'
+        '<title>Limpopo Flood Risk</title>'
+        f'<a href="{latest}.html">Latest flood-risk dashboard</a>',
+        encoding="utf-8")
+    log.info("site: %d dates, latest %s -> %s", len(dates), latest, site)
+    print(site / "index.html")
 
 
 def cmd_selftest(args):
@@ -110,7 +149,10 @@ def main():
                     help="skip if static products already exist")
     p1.set_defaults(func=cmd_build_static)
 
-    p2 = sub.add_parser("daily", help="produce today's risk GeoTIFF + bulletin")
+    p2 = sub.add_parser("daily", help="produce a risk GeoTIFF + bulletin")
+    p2.add_argument("--for", dest="for_date", metavar="YYYY-MM-DD",
+                    help="produce the product valid for this date "
+                         "(past dates use the historical-forecast archive)")
     p2.set_defaults(func=cmd_daily)
 
     p3 = sub.add_parser("selftest", help="quick sanity check")
@@ -119,6 +161,11 @@ def main():
     p4 = sub.add_parser("dashboard",
                         help="rebuild dashboard.html from the latest bulletin")
     p4.set_defaults(func=cmd_dashboard)
+
+    p5 = sub.add_parser("build-site",
+                        help="assemble dated snapshots + manifest into a site dir")
+    p5.add_argument("--site", default="_site", help="output site directory")
+    p5.set_defaults(func=cmd_build_site)
 
     args = parser.parse_args()
     args.func(args)

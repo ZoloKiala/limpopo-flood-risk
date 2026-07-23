@@ -40,6 +40,7 @@ CHIRPS_URL = (
 # pin the GFS global model for provenance parity and fall back to Open-Meteo's
 # default multi-model blend if that single model is unavailable.
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_ARCHIVE_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 OPEN_METEO_MODEL = "gfs_global"
 
 # --------------------------------------- Sentinel-1 SAR (NOW layer)

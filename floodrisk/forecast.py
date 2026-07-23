@@ -1,10 +1,13 @@
-"""WHEN layer: 24 h precipitation forecast.
+"""WHEN layer: 24 h precipitation forecast (date-aware).
 
-Sourced from the Open-Meteo forecast API (free, no key, plain JSON - no GRIB
-parsing). NOAA retired the NOMADS OPeNDAP GFS server (Service Change Notice
-25-81), so GFS is now fetched *through* Open-Meteo: we pin its GFS global model
-for provenance parity with the original design, and fall back to Open-Meteo's
-default multi-model blend if that single model is unavailable.
+Sourced from Open-Meteo (free, no key, plain JSON - no GRIB parsing). NOAA
+retired the NOMADS OPeNDAP GFS server (Service Change Notice 25-81), so GFS is
+fetched *through* Open-Meteo: its GFS global model is pinned for provenance
+parity, with the default multi-model blend as fallback.
+
+For a **future/near date** the live forecast API is used (day offset from today).
+For a **past date** the historical-forecast API is used (Open-Meteo's archive of
+past model runs) - this is what lets the dashboard reconstruct earlier days.
 
 Returns a dict with basin/window mean forecast (mm/day) and provenance.
 """
@@ -26,13 +29,25 @@ def _bbox_indices(lats, lons, bbox):
     return la, lo
 
 
-def _openmeteo_precip(model, source):
-    """Tomorrow's precipitation_sum on a 0.5deg grid via Open-Meteo.
+def _openmeteo_precip(model, source, valid_date, today):
+    """Precipitation_sum for ``valid_date`` on a 0.5deg grid via Open-Meteo.
 
-    ``model`` pins a single NWP model (e.g. "gfs_global"); ``None`` uses
-    Open-Meteo's default best-match blend. Raises on any transport/API error so
-    get_forecast() can fall through to the next source.
+    Live (valid_date >= today): forecast API, indexed by the day offset.
+    Past (valid_date < today): historical-forecast API for that single day.
+    ``model`` pins a single NWP model (e.g. "gfs_global"); ``None`` = best-match
+    blend. Raises on transport/API error so get_forecast() can fall through.
     """
+    historical = valid_date < today
+    if historical:
+        url = config.OPEN_METEO_ARCHIVE_URL
+        day_params = {"start_date": valid_date.isoformat(),
+                      "end_date": valid_date.isoformat()}
+        idx = 0
+    else:
+        url = config.OPEN_METEO_URL
+        idx = (valid_date - today).days              # 0 = today, 1 = tomorrow
+        day_params = {"forecast_days": idx + 1}
+
     lats = np.arange(config.LAT_MIN, config.LAT_MAX + 0.001, 0.5)
     lons = np.arange(config.LON_MIN, config.LON_MAX + 0.001, 0.5)
     points = [(la, lo) for la in lats for lo in lons]
@@ -45,20 +60,20 @@ def _openmeteo_precip(model, source):
             "latitude": ",".join(f"{la:.2f}" for la, _ in chunk),
             "longitude": ",".join(f"{lo:.2f}" for _, lo in chunk),
             "daily": "precipitation_sum",
-            "forecast_days": 2,
             "timezone": "UTC",
+            **day_params,
         }
         if model:
             params["models"] = model
-        r = requests.get(config.OPEN_METEO_URL, params=params, timeout=60)
+        r = requests.get(url, params=params, timeout=60)
         r.raise_for_status()
         payload = r.json()
         if isinstance(payload, dict):
             payload = [payload]
         for j, loc in enumerate(payload):
             days = loc["daily"]["precipitation_sum"]
-            day1 = days[1] if len(days) > 1 else days[0]
-            values[start + j] = np.nan if day1 is None else day1
+            val = days[idx] if len(days) > idx else days[-1]
+            values[start + j] = np.nan if val is None else val
 
     grid = values.reshape(len(lats), len(lons))
     la_m, lo_m = _bbox_indices(lats, lons, config.WINDOW_BBOX)
@@ -66,25 +81,31 @@ def _openmeteo_precip(model, source):
         "source": source,
         "basin_mm": float(np.nanmean(grid)),
         "window_mm": float(np.nanmean(grid[np.ix_(la_m, lo_m)])),
-        "valid_hours": "next calendar day (UTC)",
+        "valid_hours": ("archived forecast" if historical
+                        else "next calendar day (UTC)"),
     }
-    log.info("forecast: %s", result)
+    log.info("forecast (%s): %s", valid_date, result)
     return result
 
 
-def get_forecast():
-    """Best-available 24 h precipitation forecast with provenance.
+def get_forecast(valid_date=None, today=None):
+    """Best-available precipitation forecast for ``valid_date`` with provenance.
 
     Primary: GFS global via Open-Meteo. Fallback: Open-Meteo default blend.
+    ``valid_date``/``today`` are ``datetime.date`` (default: tomorrow / today UTC).
     """
+    today = today or dt.datetime.now(dt.timezone.utc).date()
+    valid_date = valid_date or (today + dt.timedelta(days=1))
+    historical = valid_date < today
+    tag = "archived" if historical else "forecast"
     sources = (
-        (config.OPEN_METEO_MODEL, f"GFS 0.25deg global via Open-Meteo "
-                                  f"(models={config.OPEN_METEO_MODEL})"),
-        (None, "Open-Meteo forecast API (default multi-model blend)"),
+        (config.OPEN_METEO_MODEL,
+         f"GFS 0.25deg global via Open-Meteo ({tag}, models={config.OPEN_METEO_MODEL})"),
+        (None, f"Open-Meteo API ({tag}, default multi-model blend)"),
     )
     for model, source in sources:
         try:
-            return _openmeteo_precip(model, source)
+            return _openmeteo_precip(model, source, valid_date, today)
         except Exception as e:  # noqa: BLE001 - try the next source
             log.warning("forecast source '%s' failed: %s", source, e)
-    raise RuntimeError("no forecast source reachable (Open-Meteo GFS + blend)")
+    raise RuntimeError(f"no forecast source reachable for {valid_date}")

@@ -5,6 +5,8 @@ venv/
 .env
 static/*
 outputs/
+_site/
+_site_test/
 *.nc
 *.tif
 !static/.gitkeep
