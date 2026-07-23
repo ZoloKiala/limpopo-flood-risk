@@ -116,17 +116,30 @@ def _tile(value, label, sub=""):
 
 def _legend():
     grad = ", ".join(f"rgb{c}" for _, c in _YLORRD)
+    grey = "linear-gradient(90deg,rgb(238,240,243),rgb(94,104,120))"
+    mod, high = config.RISK_MODERATE, config.RISK_HIGH
     return f"""
     <div class="legend">
-      <div class="lrow">
-        <span class="lname">Risk index</span>
-        <span class="bar" style="background:linear-gradient(90deg,{grad})"></span>
-        <span class="lends">0 &nbsp; low → high &nbsp; 1</span>
+      <div class="lblock">
+        <div class="lhead">Risk index
+          <span class="lmuted">forecast × susceptibility</span></div>
+        <div class="rampwrap">
+          <span class="rend">0</span>
+          <span class="ramp" style="background:linear-gradient(90deg,{grad})">
+            <span class="tick" style="left:{mod:.0%}"></span>
+            <span class="tick" style="left:{high:.0%}"></span>
+          </span>
+          <span class="rend">1</span>
+        </div>
+        <div class="breaks">class breaks · {mod:.2f} moderate · {high:.2f} high</div>
       </div>
-      <div class="lrow swatches">
-        <span><i style="background:rgb{_PERMANENT_WATER}"></i>Permanent river</span>
-        <span><i style="background:rgb{_OBSERVED_WATER}"></i>Observed water now (SAR)</span>
-        <span><i style="background:linear-gradient(90deg,rgb(238,240,243),rgb(94,104,120))"></i>Susceptibility (base)</span>
+      <div class="lblock">
+        <div class="lhead">Map layers</div>
+        <div class="swatches">
+          <span><i style="background:{grey}"></i>Susceptibility (terrain base)</span>
+          <span><i style="background:rgb{_PERMANENT_WATER}"></i>Permanent river</span>
+          <span><i style="background:rgb{_OBSERVED_WATER}"></i>Observed water now (SAR)</span>
+        </div>
       </div>
     </div>"""
 
@@ -253,16 +266,24 @@ _STYLE = """<style>
   .fr .map figcaption {{ color:var(--muted); font-size:12px; margin-top:10px;
     text-align:center; }}
   .fr .nomap {{ padding:60px 20px; text-align:center; color:var(--muted); }}
-  .fr .legend {{ margin-top:12px; font-size:12px; }}
-  .fr .lrow {{ display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    margin-top:8px; color:var(--muted); }}
-  .fr .lname {{ font-weight:600; color:var(--ink); }}
-  .fr .bar {{ flex:1; min-width:120px; height:12px; border-radius:6px;
-    border:1px solid var(--line); }}
-  .fr .swatches {{ gap:18px; }}
-  .fr .swatches span {{ display:flex; align-items:center; gap:6px; }}
-  .fr .swatches i {{ width:14px; height:14px; border-radius:4px; display:inline-block;
-    border:1px solid rgba(0,0,0,.15); }}
+  .fr .legend {{ margin-top:14px; font-size:12px; display:flex;
+    flex-direction:column; gap:12px; }}
+  .fr .lhead {{ font-weight:600; color:var(--ink); margin-bottom:7px; }}
+  .fr .lhead .lmuted {{ font-weight:400; color:var(--muted); margin-left:6px; }}
+  .fr .rampwrap {{ display:flex; align-items:center; gap:8px; }}
+  .fr .rend {{ color:var(--muted); font-variant-numeric:tabular-nums; }}
+  .fr .ramp {{ position:relative; flex:1; min-width:140px; height:14px;
+    border-radius:5px; border:1px solid var(--line); }}
+  .fr .ramp .tick {{ position:absolute; top:-3px; bottom:-3px; width:2px;
+    background:#fff; box-shadow:0 0 0 .5px rgba(0,0,0,.55);
+    transform:translateX(-1px); }}
+  .fr .breaks {{ color:var(--muted); margin-top:6px;
+    font-variant-numeric:tabular-nums; }}
+  .fr .swatches {{ display:flex; gap:18px; flex-wrap:wrap; }}
+  .fr .swatches span {{ display:flex; align-items:center; gap:6px;
+    color:var(--muted); }}
+  .fr .swatches i {{ width:18px; height:12px; border-radius:3px;
+    display:inline-block; border:1px solid rgba(0,0,0,.15); }}
   .fr .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
     gap:12px; }}
   .fr .card {{ background:var(--surface); border:1px solid var(--line);
