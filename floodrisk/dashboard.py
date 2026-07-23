@@ -1,19 +1,19 @@
-"""Render the daily product into a self-contained HTML dashboard.
+"""Render the daily product into an HTML dashboard.
 
-One portable file (``outputs/dashboard.html``) with the risk map inlined as a
-data URI, an alert banner, forecast + risk-area stat tiles, the SAR NOW status
-and full provenance. No JavaScript, no external assets - it opens straight from
-disk, ships as a CI artifact, and can be published to GitHub Pages as-is.
+Two rendering modes share one design:
 
-The map is a single composite raster: a neutral grey susceptibility base (so
-the flood-prone terrain is visible even on a dry LOW day), a YlOrRd sequential
-overlay where the risk index rises, the permanent river in deep blue, and
-SAR-observed open water in bright cyan. A standalone ``risk_map_<date>.png`` is
-written alongside.
+* ``build_dashboard`` writes ``outputs/dashboard.html`` for GitHub Pages / local
+  viewing — an **interactive Leaflet map** on an Esri World Imagery + labels
+  basemap (a Google-Hybrid lookalike; Google's own tiles aren't licensed for
+  this), with the risk and susceptibility fields as semi-transparent overlays,
+  an opacity slider and layer toggles.
+* ``render_fragment`` returns an embeddable ``<style>`` + markup string with a
+  **self-contained static composite** map (inlined PNG, no external requests),
+  for sandboxes that block tiles/CDNs (e.g. the Artifact preview).
 
-``render_fragment`` returns the same content as an embeddable ``<style>`` +
-markup string (no <html>/<head>/<body>), for hosts that supply their own page
-skeleton.
+Both carry the alert banner, forecast + risk-area stat tiles, the SAR NOW
+status and provenance. A standalone ``risk_map_<date>.png`` (opaque composite)
+is written alongside for reuse.
 """
 import logging
 import struct
@@ -47,6 +47,15 @@ ALERT_BLURB = {
     "LOW": "No significant rainfall forecast; flood risk is low across the window.",
 }
 
+# Esri basemap (free, attributed) - the Google-Hybrid substitute.
+_ESRI_IMAGERY = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
+                 "World_Imagery/MapServer/tile/{z}/{y}/{x}")
+_ESRI_LABELS = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
+                "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}")
+_LEAFLET_HEAD = (
+    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">\n'
+    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>')
+
 
 def _ramp(v, stops):
     """Map v in [0, 1] (any shape) to an (..., 3) uint8 array via linear stops."""
@@ -76,35 +85,70 @@ def _png_data_uri(rgba):
     return png, "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
-def _render_map(geotiff_path):
-    """Composite the 4-band risk GeoTIFF -> (png_bytes, data_uri, bounds) or None."""
-    path = Path(geotiff_path)
-    if not path.exists():
-        log.warning("risk GeoTIFF missing for dashboard: %s", path)
-        return None
-
+def _read_bands(geotiff_path):
+    """Read the 4 risk bands decimated to MAP_PX -> (risk, suscept, perm, obs, bounds)."""
     import rasterio
     from rasterio.enums import Resampling
 
-    with rasterio.open(path) as src:
+    with rasterio.open(geotiff_path) as src:
         w = MAP_PX
         h = max(1, round(MAP_PX * src.height / src.width))
         data = src.read(out_shape=(src.count, h, w),
                         resampling=Resampling.bilinear).astype("float32")
         bounds = src.bounds
+    obs = data[3] if data.shape[0] > 3 else np.zeros_like(data[0])
+    return data[0], data[1], data[2], obs, bounds
 
-    risk, suscept, permanent = data[0], data[1], data[2]
-    observed = data[3] if data.shape[0] > 3 else np.zeros_like(risk)
+
+def _render_map(geotiff_path):
+    """Opaque composite (susceptibility base + overlays) -> (png, uri, bounds) | None."""
+    path = Path(geotiff_path)
+    if not path.exists():
+        log.warning("risk GeoTIFF missing for dashboard: %s", path)
+        return None
+    risk, suscept, permanent, observed, bounds = _read_bands(path)
 
     img = _ramp(suscept, _GREY)
-    hot = risk >= _RISK_FLOOR
-    img[hot] = _ramp(risk, _YLORRD)[hot]
+    img[risk >= _RISK_FLOOR] = _ramp(risk, _YLORRD)[risk >= _RISK_FLOOR]
     img[permanent >= 0.5] = _PERMANENT_WATER
     img[observed >= config.WATER_PROB_THRESH] = _OBSERVED_WATER
 
     rgba = np.dstack([img, np.full(img.shape[:2], 255, "uint8")])
     png_bytes, uri = _png_data_uri(rgba)
     return png_bytes, uri, bounds
+
+
+def _render_overlays(geotiff_path):
+    """Alpha-transparent overlays for the tiled basemap -> dict | None.
+
+    Returns risk (risk + water, transparent elsewhere) and susceptibility
+    (grey, alpha scaled by value) as data URIs, plus (w, s, e, n) bounds.
+    """
+    path = Path(geotiff_path)
+    if not path.exists():
+        log.warning("risk GeoTIFF missing for dashboard: %s", path)
+        return None
+    risk, suscept, permanent, observed, b = _read_bands(path)
+    h, w = risk.shape
+
+    rgb = _ramp(risk, _YLORRD).astype("float32")
+    alpha = np.where(risk >= _RISK_FLOOR, 0.80, 0.0).astype("float32")
+    pm = permanent >= 0.5
+    rgb[pm], alpha[pm] = _PERMANENT_WATER, 0.85
+    ob = observed >= config.WATER_PROB_THRESH
+    rgb[ob], alpha[ob] = _OBSERVED_WATER, 0.90
+    risk_rgba = np.dstack([rgb.round().astype("uint8"),
+                           (alpha * 255).round().astype("uint8")])
+
+    sus_rgb = _ramp(suscept, _GREY)
+    sus_alpha = (np.clip(suscept, 0.0, 1.0) * 0.55 * 255).round().astype("uint8")
+    sus_rgba = np.dstack([sus_rgb, sus_alpha])
+
+    return {
+        "risk": _png_data_uri(risk_rgba)[1],
+        "suscept": _png_data_uri(sus_rgba)[1],
+        "bounds": (b.left, b.bottom, b.right, b.top),
+    }
 
 
 # --- HTML pieces ------------------------------------------------------------
@@ -160,25 +204,79 @@ def _observation_card(observation):
             f'</div>')
 
 
-def _build_subs(payload, output_dir, write_png):
+def _extent(left, bottom, right, top):
+    return (f"{left:g}–{right:g}°E, {-top:g}–{-bottom:g}°S "
+            f"· EPSG:4326 · ~{config.CELL:g} m")
+
+
+_NOMAP = ('<figure class="map"><div class="nomap">Risk GeoTIFF not found — run '
+          '<code>floodrisk daily</code> first.</div></figure>')
+
+
+def _map_interactive(overlays):
+    """Leaflet map figure (Esri hybrid basemap + risk/susceptibility overlays)."""
+    w, s, e, n = overlays["bounds"]
+    script = f"""<script>
+(function() {{
+  var bounds = [[{s:.6f}, {w:.6f}], [{n:.6f}, {e:.6f}]];
+  var sat = L.tileLayer('{_ESRI_IMAGERY}', {{maxZoom: 18}});
+  var lab = L.tileLayer('{_ESRI_LABELS}', {{maxZoom: 18}});
+  var hybrid = L.layerGroup([sat, lab]);
+  var map = L.map('fr-map', {{layers: [hybrid]}});
+  map.fitBounds(bounds);
+  map.attributionControl.addAttribution(
+    'Imagery &copy; Esri, Maxar, Earthstar Geographics');
+  var risk = L.imageOverlay("{overlays['risk']}", bounds, {{opacity: 0.8}}).addTo(map);
+  var sus = L.imageOverlay("{overlays['suscept']}", bounds, {{opacity: 0.55}});
+  L.control.layers({{'Satellite (hybrid)': hybrid}},
+    {{'Risk &amp; water': risk, 'Susceptibility': sus}},
+    {{collapsed: false}}).addTo(map);
+  var Op = L.Control.extend({{options: {{position: 'topright'}},
+    onAdd: function() {{
+      var d = L.DomUtil.create('div', 'fr-op');
+      d.innerHTML = '<label>Risk opacity</label>' +
+        '<input type="range" min="0" max="100" value="80" aria-label="Risk opacity">';
+      L.DomEvent.disableClickPropagation(d);
+      d.querySelector('input').oninput = function(ev) {{
+        risk.setOpacity(ev.target.value / 100);
+      }};
+      return d;
+    }}}});
+  map.addControl(new Op());
+}})();
+</script>"""
+    return (f'<figure class="map"><div id="fr-map"></div>{script}'
+            f'{_legend()}<figcaption>{_extent(w, s, e, n)}</figcaption></figure>')
+
+
+def _map_static(geotiff, output_dir, write_png):
+    """Self-contained composite <img> figure (no external requests)."""
+    rendered = _render_map(geotiff)
+    if not rendered:
+        return _NOMAP
+    png_bytes, uri, b = rendered
+    if write_png:
+        stamp = Path(geotiff).stem.replace("flood_risk_", "")
+        (Path(output_dir) / f"risk_map_{stamp}.png").write_bytes(png_bytes)
+    return (f'<figure class="map"><img alt="Flood risk map" src="{uri}">'
+            f'{_legend()}<figcaption>{_extent(b.left, b.bottom, b.right, b.top)}'
+            f'</figcaption></figure>')
+
+
+def _build_subs(payload, output_dir, write_png, interactive):
     """Compute the template substitutions (renders + optionally saves the map)."""
     forecast, thresholds = payload["forecast"], payload["thresholds"]
     risk, observation = payload["risk"], payload.get("observation")
     level = payload["alert_level"]
-    stamp = payload["valid"].replace("-", "")
+    geotiff = risk.get("geotiff", "")
 
-    rendered = _render_map(risk.get("geotiff", ""))
-    if rendered:
-        png_bytes, map_uri, b = rendered
+    if interactive:
+        overlays = _render_overlays(geotiff)
         if write_png:
-            (Path(output_dir) / f"risk_map_{stamp}.png").write_bytes(png_bytes)
-        extent = (f"{b.left:g}–{b.right:g}°E, {-b.top:g}–{-b.bottom:g}°S "
-                  f"· EPSG:4326 · ~{config.CELL:g} m")
-        map_html = (f'<figure class="map"><img alt="Flood risk map" src="{map_uri}">'
-                    f'{_legend()}<figcaption>{extent}</figcaption></figure>')
+            _map_static(geotiff, output_dir, True)   # also save standalone PNG
+        map_html = _map_interactive(overlays) if overlays else _NOMAP
     else:
-        map_html = ('<figure class="map"><div class="nomap">Risk GeoTIFF not '
-                    'found — run <code>floodrisk daily</code> first.</div></figure>')
+        map_html = _map_static(geotiff, output_dir, write_png)
 
     tiles = "".join([
         _tile(f"{risk['rain_factor']:.2f}", "Rain factor", "forecast ÷ P95"),
@@ -199,22 +297,30 @@ def _build_subs(payload, output_dir, write_png):
         "forecast_source": forecast["source"],
         "thresholds_source": thresholds.get("source", "CHIRPS"),
         "observation_card": _observation_card(observation),
+        "print_btn": ('<button class="printbtn" type="button" '
+                      'onclick="window.print()">Print / PDF</button>'
+                      if interactive else ""),
     }
 
 
 def render_fragment(payload, output_dir=None, write_png=False):
-    """Return the dashboard as an embeddable ``<style>`` + markup string."""
-    subs = _build_subs(payload, output_dir or config.OUTPUT_DIR, write_png)
+    """Return the dashboard as an embeddable ``<style>`` + markup string.
+
+    Static/self-contained map (no tiles or CDN) so it renders in sandboxes that
+    block external requests, e.g. the Artifact preview.
+    """
+    subs = _build_subs(payload, output_dir or config.OUTPUT_DIR, write_png,
+                       interactive=False)
     return _STYLE.format(color=subs["color"]) + "\n" + _BODY.format(**subs)
 
 
 def build_dashboard(payload, output_dir=None, valid_date=None):
-    """Write ``dashboard.html`` (+ standalone map PNG) from a bulletin payload."""
+    """Write ``dashboard.html`` (interactive map) + standalone map PNG."""
     output_dir = Path(output_dir or config.OUTPUT_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    subs = _build_subs(payload, output_dir, write_png=True)
-    html = _DOC.format(title_date=subs["valid"],
+    subs = _build_subs(payload, output_dir, write_png=True, interactive=True)
+    html = _DOC.format(title_date=subs["valid"], leaflet=_LEAFLET_HEAD,
                        style=_STYLE.format(color=subs["color"]),
                        body=_BODY.format(**subs))
     out = output_dir / "dashboard.html"
@@ -246,6 +352,12 @@ _STYLE = """<style>
   .fr h1 {{ font-size:22px; margin:0; letter-spacing:-.01em; }}
   .fr .place {{ color:var(--muted); font-size:13px; }}
   .fr .dates {{ color:var(--muted); font-size:13px; text-align:right; }}
+  .fr .hend {{ display:flex; align-items:center; gap:14px; }}
+  .fr .printbtn {{ font:inherit; font-size:12px; cursor:pointer; padding:7px 13px;
+    border:1px solid var(--line); border-radius:8px; background:var(--surface);
+    color:var(--ink); white-space:nowrap; }}
+  .fr .printbtn:hover {{ border-color:var(--accent); }}
+  .fr .printbtn:focus-visible {{ outline:2px solid var(--accent); outline-offset:2px; }}
   .fr .banner {{ display:flex; align-items:center; gap:16px; background:var(--surface);
     border:1px solid var(--line); border-left:6px solid var(--accent);
     border-radius:12px; padding:16px 20px; margin-bottom:20px; }}
@@ -262,7 +374,14 @@ _STYLE = """<style>
   .fr .tile .sub {{ font-size:12px; color:var(--muted); margin-top:2px; }}
   .fr .map {{ margin:0 0 22px; background:var(--surface); border:1px solid var(--line);
     border-radius:12px; padding:14px; }}
-  .fr .map img {{ width:100%; height:auto; border-radius:8px; display:block; }}
+  .fr .map > img {{ width:100%; height:auto; border-radius:8px; display:block; }}
+  .fr #fr-map {{ height:460px; width:100%; border-radius:8px; background:var(--line);
+    z-index:0; }}
+  .fr .leaflet-container, .fr .leaflet-container * {{ box-sizing:content-box; }}
+  .fr .fr-op {{ background:var(--surface); color:var(--ink); padding:6px 9px;
+    border-radius:8px; box-shadow:0 1px 5px rgba(0,0,0,.25); font-size:12px;
+    display:flex; flex-direction:column; gap:3px; }}
+  .fr .fr-op input {{ width:120px; }}
   .fr .map figcaption {{ color:var(--muted); font-size:12px; margin-top:10px;
     text-align:center; }}
   .fr .nomap {{ padding:60px 20px; text-align:center; color:var(--muted); }}
@@ -295,13 +414,26 @@ _STYLE = """<style>
   .fr footer {{ color:var(--muted); font-size:12px; margin-top:26px;
     border-top:1px solid var(--line); padding-top:14px; }}
   .fr code {{ background:var(--line); padding:1px 5px; border-radius:4px; }}
+  @media print {{
+    :root {{ --bg:#fff; --surface:#fff; --ink:#111; --muted:#444; --line:#ccc; }}
+    .fr {{ background:#fff; min-height:0; }}
+    .fr, .fr * {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+    .fr .wrap {{ max-width:none; padding:0; }}
+    .fr .printbtn {{ display:none; }}
+    .fr .leaflet-control-container {{ display:none !important; }}
+    .fr #fr-map {{ height:430px; }}
+    .fr .banner, .fr .tile, .fr .card, .fr .map {{ break-inside:avoid; }}
+  }}
 </style>"""
 
 _BODY = """<div class="fr"><div class="wrap">
   <header>
     <div><h1>Limpopo Flood Risk</h1>
       <div class="place">Lower Limpopo floodplain · Chibuto reach</div></div>
-    <div class="dates">valid <b>{valid}</b><br>issued {issued}</div>
+    <div class="hend">
+      <div class="dates">valid <b>{valid}</b><br>issued {issued}</div>
+      {print_btn}
+    </div>
   </header>
 
   <div class="banner">
@@ -332,6 +464,7 @@ _DOC = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Limpopo Flood Risk — {title_date}</title>
+{leaflet}
 <style>body {{ margin:0; background:var(--bg); }}</style>
 {style}
 </head><body>
