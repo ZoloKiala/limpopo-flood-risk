@@ -25,6 +25,9 @@ concurrency:
 env:
   SITE_URL: https://zolokiala.github.io/limpopo-flood-risk
   BACKFILL_DAYS: "14"
+  # Fixed historical flood events to keep in the archive (Cyclone Freddy's
+  # first Mozambique landfall, Feb 2023, drove heavy rain over the reach).
+  EVENT_DATES: "2023-02-24 2023-02-25 2023-02-26 2023-02-27 2023-02-28 2023-03-01 2023-03-02"
 
 jobs:
   publish:
@@ -70,11 +73,15 @@ jobs:
             echo "no existing site yet (first run) - everything will be backfilled"
           fi
 
-      - name: Backfill missing days in the recent window
+      - name: Backfill missing days (recent window + fixed flood events)
         run: |
           TOMORROW=$(date -u -d "tomorrow" +%Y-%m-%d)
+          DATES=""
           for i in $(seq 0 "$BACKFILL_DAYS"); do
-            D=$(date -u -d "$TOMORROW -${i} days" +%Y-%m-%d)
+            DATES="$DATES $(date -u -d "$TOMORROW -${i} days" +%Y-%m-%d)"
+          done
+          DATES="$DATES $EVENT_DATES"
+          for D in $DATES; do
             if [ -f "_site/$D.html" ]; then
               echo "have $D"
             else
