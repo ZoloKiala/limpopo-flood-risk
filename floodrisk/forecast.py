@@ -13,6 +13,7 @@ Returns a dict with basin/window mean forecast (mm/day) and provenance.
 """
 import datetime as dt
 import logging
+import time
 
 import numpy as np
 import requests
@@ -27,6 +28,23 @@ def _bbox_indices(lats, lons, bbox):
     la = (lats >= lat_min) & (lats <= lat_max)
     lo = (lons >= lon_min) & (lons <= lon_max)
     return la, lo
+
+
+def _get_json(url, params, tries=3):
+    """GET with retry+backoff. Open-Meteo throttles bursts with hung sockets;
+    a couple of retries clears the transient read timeouts."""
+    last = None
+    for attempt in range(tries):
+        try:
+            r = requests.get(url, params=params, timeout=45)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:  # noqa: BLE001 - retry transient failures
+            last = e
+            log.debug("open-meteo attempt %d/%d failed: %s", attempt + 1, tries, e)
+            if attempt < tries - 1:
+                time.sleep(3 + 4 * attempt)   # 3s, 7s
+    raise last
 
 
 def _openmeteo_precip(model, source, valid_date, today):
@@ -53,7 +71,7 @@ def _openmeteo_precip(model, source, valid_date, today):
     points = [(la, lo) for la in lats for lo in lons]
 
     values = np.full(len(points), np.nan, dtype="float32")
-    B = 50
+    B = 250   # all study-window points fit in one request (fewer calls = less throttling)
     for start in range(0, len(points), B):
         chunk = points[start:start + B]
         params = {
@@ -65,9 +83,7 @@ def _openmeteo_precip(model, source, valid_date, today):
         }
         if model:
             params["models"] = model
-        r = requests.get(url, params=params, timeout=60)
-        r.raise_for_status()
-        payload = r.json()
+        payload = _get_json(url, params)
         if isinstance(payload, dict):
             payload = [payload]
         for j, loc in enumerate(payload):
