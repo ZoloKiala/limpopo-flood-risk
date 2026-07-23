@@ -8,7 +8,12 @@ name: Publish dashboard to Pages
 # Runs after each successful "Daily flood risk" run, and on manual dispatch.
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      full_rebuild:
+        description: "Re-render every snapshot (recent window + events) with the current templates"
+        type: boolean
+        default: false
   workflow_run:
     workflows: ["Daily flood risk"]
     types: [completed]
@@ -59,6 +64,7 @@ jobs:
         run: python -m floodrisk build-static --if-missing
 
       - name: Carry forward already-published days
+        if: ${{ github.event.inputs.full_rebuild != 'true' }}
         run: |
           mkdir -p _site
           if curl -sf "$SITE_URL/manifest.json" -o /tmp/manifest.json; then

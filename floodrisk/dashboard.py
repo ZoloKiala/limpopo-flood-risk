@@ -354,84 +354,84 @@ _STYLE = """<style>
     --muted:#61708a; --line:#e6e9ef; }}
   .fr * {{ box-sizing:border-box; }}
   .fr {{ color:var(--ink); background:var(--bg); min-height:100vh;
-    font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }}
-  .fr .wrap {{ max-width:1040px; margin:0 auto; padding:28px 20px 56px; }}
+    font:13.5px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }}
+  .fr .wrap {{ max-width:920px; margin:0 auto; padding:14px 14px 28px; }}
   .fr header {{ display:flex; justify-content:space-between; align-items:baseline;
-    flex-wrap:wrap; gap:8px; margin-bottom:18px; }}
-  .fr h1 {{ font-size:22px; margin:0; letter-spacing:-.01em; }}
-  .fr .place {{ color:var(--muted); font-size:13px; }}
-  .fr .dates {{ color:var(--muted); font-size:13px; text-align:right; }}
-  .fr .hend {{ display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    flex-wrap:wrap; gap:6px; margin-bottom:10px; }}
+  .fr h1 {{ font-size:18px; margin:0; letter-spacing:-.01em; }}
+  .fr .place {{ color:var(--muted); font-size:11.5px; }}
+  .fr .dates {{ color:var(--muted); font-size:11.5px; text-align:right; }}
+  .fr .hend {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap;
     justify-content:flex-end; }}
-  .fr .datenav {{ display:flex; align-items:center; gap:4px; }}
-  .fr .datenav select {{ font:inherit; font-size:13px; padding:5px 8px;
-    border:1px solid var(--line); border-radius:8px; background:var(--surface);
+  .fr .datenav {{ display:flex; align-items:center; gap:3px; }}
+  .fr .datenav select {{ font:inherit; font-size:12px; padding:4px 7px;
+    border:1px solid var(--line); border-radius:7px; background:var(--surface);
     color:var(--ink); }}
-  .fr .navbtn {{ font:inherit; cursor:pointer; padding:5px 10px; line-height:1;
-    border:1px solid var(--line); border-radius:8px; background:var(--surface);
+  .fr .navbtn {{ font:inherit; cursor:pointer; padding:4px 8px; line-height:1;
+    border:1px solid var(--line); border-radius:7px; background:var(--surface);
     color:var(--ink); }}
   .fr .navbtn:hover {{ border-color:var(--accent); }}
   .fr .navbtn:disabled {{ opacity:.4; cursor:default; }}
-  .fr .printbtn {{ font:inherit; font-size:12px; cursor:pointer; padding:7px 13px;
-    border:1px solid var(--line); border-radius:8px; background:var(--surface);
+  .fr .printbtn {{ font:inherit; font-size:12px; cursor:pointer; padding:5px 11px;
+    border:1px solid var(--line); border-radius:7px; background:var(--surface);
     color:var(--ink); white-space:nowrap; }}
   .fr .printbtn:hover {{ border-color:var(--accent); }}
   .fr .printbtn:focus-visible {{ outline:2px solid var(--accent); outline-offset:2px; }}
-  .fr .banner {{ display:flex; align-items:center; gap:16px; background:var(--surface);
-    border:1px solid var(--line); border-left:6px solid var(--accent);
-    border-radius:12px; padding:16px 20px; margin-bottom:20px; }}
-  .fr .badge {{ background:var(--accent); color:#fff; font-weight:700; font-size:15px;
-    letter-spacing:.08em; padding:8px 16px; border-radius:8px; white-space:nowrap; }}
-  .fr .banner p {{ margin:0; color:var(--ink); }}
-  .fr .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-    gap:12px; margin-bottom:22px; }}
+  .fr .banner {{ display:flex; align-items:center; gap:11px; background:var(--surface);
+    border:1px solid var(--line); border-left:5px solid var(--accent);
+    border-radius:9px; padding:9px 13px; margin-bottom:11px; }}
+  .fr .badge {{ background:var(--accent); color:#fff; font-weight:700; font-size:12.5px;
+    letter-spacing:.07em; padding:5px 11px; border-radius:6px; white-space:nowrap; }}
+  .fr .banner p {{ margin:0; color:var(--ink); font-size:13px; }}
+  .fr .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
+    gap:7px; margin-bottom:12px; }}
   .fr .tile {{ background:var(--surface); border:1px solid var(--line);
-    border-radius:12px; padding:16px; }}
-  .fr .tile .val {{ font-size:26px; font-weight:700; letter-spacing:-.02em; }}
-  .fr .tile .val .u {{ font-size:14px; font-weight:600; color:var(--muted); }}
-  .fr .tile .lab {{ font-size:13px; font-weight:600; margin-top:2px; }}
-  .fr .tile .sub {{ font-size:12px; color:var(--muted); margin-top:2px; }}
-  .fr .map {{ margin:0 0 22px; background:var(--surface); border:1px solid var(--line);
-    border-radius:12px; padding:14px; }}
-  .fr .map > img {{ width:100%; height:auto; border-radius:8px; display:block; }}
-  .fr #fr-map {{ height:460px; width:100%; border-radius:8px; background:var(--line);
+    border-radius:9px; padding:9px 11px; }}
+  .fr .tile .val {{ font-size:19px; font-weight:700; letter-spacing:-.02em; }}
+  .fr .tile .val .u {{ font-size:11px; font-weight:600; color:var(--muted); }}
+  .fr .tile .lab {{ font-size:11.5px; font-weight:600; margin-top:1px; }}
+  .fr .tile .sub {{ font-size:10.5px; color:var(--muted); margin-top:1px; }}
+  .fr .map {{ margin:0 0 12px; background:var(--surface); border:1px solid var(--line);
+    border-radius:9px; padding:9px; }}
+  .fr .map > img {{ width:100%; height:auto; border-radius:6px; display:block; }}
+  .fr #fr-map {{ height:320px; width:100%; border-radius:6px; background:var(--line);
     z-index:0; }}
   .fr .leaflet-container, .fr .leaflet-container * {{ box-sizing:content-box; }}
-  .fr .fr-op {{ background:var(--surface); color:var(--ink); padding:6px 9px;
-    border-radius:8px; box-shadow:0 1px 5px rgba(0,0,0,.25); font-size:12px;
-    display:flex; flex-direction:column; gap:3px; }}
-  .fr .fr-op input {{ width:120px; }}
-  .fr .map figcaption {{ color:var(--muted); font-size:12px; margin-top:10px;
+  .fr .fr-op {{ background:var(--surface); color:var(--ink); padding:5px 8px;
+    border-radius:7px; box-shadow:0 1px 5px rgba(0,0,0,.25); font-size:11.5px;
+    display:flex; flex-direction:column; gap:2px; }}
+  .fr .fr-op input {{ width:110px; }}
+  .fr .map figcaption {{ color:var(--muted); font-size:11px; margin-top:7px;
     text-align:center; }}
-  .fr .nomap {{ padding:60px 20px; text-align:center; color:var(--muted); }}
-  .fr .legend {{ margin-top:14px; font-size:12px; display:flex;
-    flex-direction:column; gap:12px; }}
-  .fr .lhead {{ font-weight:600; color:var(--ink); margin-bottom:7px; }}
+  .fr .nomap {{ padding:36px 16px; text-align:center; color:var(--muted); }}
+  .fr .legend {{ margin-top:9px; font-size:11.5px; display:flex;
+    flex-direction:column; gap:7px; }}
+  .fr .lhead {{ font-weight:600; color:var(--ink); margin-bottom:4px; }}
   .fr .lhead .lmuted {{ font-weight:400; color:var(--muted); margin-left:6px; }}
-  .fr .rampwrap {{ display:flex; align-items:center; gap:8px; }}
+  .fr .rampwrap {{ display:flex; align-items:center; gap:7px; }}
   .fr .rend {{ color:var(--muted); font-variant-numeric:tabular-nums; }}
-  .fr .ramp {{ position:relative; flex:1; min-width:140px; height:14px;
-    border-radius:5px; border:1px solid var(--line); }}
-  .fr .ramp .tick {{ position:absolute; top:-3px; bottom:-3px; width:2px;
+  .fr .ramp {{ position:relative; flex:1; min-width:130px; height:11px;
+    border-radius:4px; border:1px solid var(--line); }}
+  .fr .ramp .tick {{ position:absolute; top:-2px; bottom:-2px; width:2px;
     background:#fff; box-shadow:0 0 0 .5px rgba(0,0,0,.55);
     transform:translateX(-1px); }}
-  .fr .breaks {{ color:var(--muted); margin-top:6px;
+  .fr .breaks {{ color:var(--muted); margin-top:4px;
     font-variant-numeric:tabular-nums; }}
-  .fr .swatches {{ display:flex; gap:18px; flex-wrap:wrap; }}
-  .fr .swatches span {{ display:flex; align-items:center; gap:6px;
+  .fr .swatches {{ display:flex; gap:13px; flex-wrap:wrap; }}
+  .fr .swatches span {{ display:flex; align-items:center; gap:5px;
     color:var(--muted); }}
-  .fr .swatches i {{ width:18px; height:12px; border-radius:3px;
+  .fr .swatches i {{ width:15px; height:10px; border-radius:3px;
     display:inline-block; border:1px solid rgba(0,0,0,.15); }}
-  .fr .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-    gap:12px; }}
+  .fr .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(205px,1fr));
+    gap:8px; }}
   .fr .card {{ background:var(--surface); border:1px solid var(--line);
-    border-radius:12px; padding:16px; }}
-  .fr .card h3 {{ margin:0 0 8px; font-size:13px; text-transform:uppercase;
+    border-radius:9px; padding:11px 12px; }}
+  .fr .card h3 {{ margin:0 0 5px; font-size:11.5px; text-transform:uppercase;
     letter-spacing:.06em; color:var(--muted); }}
-  .fr .card p {{ margin:0 0 6px; }}
-  .fr .muted {{ color:var(--muted); font-size:13px; }}
-  .fr footer {{ color:var(--muted); font-size:12px; margin-top:26px;
-    border-top:1px solid var(--line); padding-top:14px; }}
+  .fr .card p {{ margin:0 0 4px; }}
+  .fr .muted {{ color:var(--muted); font-size:11.5px; }}
+  .fr footer {{ color:var(--muted); font-size:10.5px; margin-top:14px;
+    border-top:1px solid var(--line); padding-top:9px; }}
   .fr code {{ background:var(--line); padding:1px 5px; border-radius:4px; }}
   @media print {{
     :root {{ --bg:#fff; --surface:#fff; --ink:#111; --muted:#444; --line:#ccc; }}
@@ -440,7 +440,7 @@ _STYLE = """<style>
     .fr .wrap {{ max-width:none; padding:0; }}
     .fr .printbtn, .fr .datenav {{ display:none; }}
     .fr .leaflet-control-container {{ display:none !important; }}
-    .fr #fr-map {{ height:430px; }}
+    .fr #fr-map {{ height:300px; }}
     .fr .banner, .fr .tile, .fr .card, .fr .map {{ break-inside:avoid; }}
   }}
 </style>"""
