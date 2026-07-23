@@ -9,10 +9,12 @@ The map is a single composite raster: a neutral grey susceptibility base (so
 the flood-prone terrain is visible even on a dry LOW day), a YlOrRd sequential
 overlay where the risk index rises, the permanent river in deep blue, and
 SAR-observed open water in bright cyan. A standalone ``risk_map_<date>.png`` is
-written alongside for reuse.
+written alongside.
+
+``render_fragment`` returns the same content as an embeddable ``<style>`` +
+markup string (no <html>/<head>/<body>), for hosts that supply their own page
+skeleton.
 """
-import datetime as dt
-import json
 import logging
 import struct
 import zlib
@@ -56,7 +58,7 @@ def _ramp(v, stops):
 
 
 def _png_data_uri(rgba):
-    """Encode an (H, W, 4) uint8 array as a base64 PNG data URI (stdlib only)."""
+    """Encode an (H, W, 4) uint8 array -> (png_bytes, base64 data URI); stdlib only."""
     import base64
 
     h, w = rgba.shape[:2]
@@ -105,7 +107,7 @@ def _render_map(geotiff_path):
     return png_bytes, uri, bounds
 
 
-# --- HTML -------------------------------------------------------------------
+# --- HTML pieces ------------------------------------------------------------
 def _tile(value, label, sub=""):
     sub = f'<div class="sub">{sub}</div>' if sub else ""
     return (f'<div class="tile"><div class="val">{value}</div>'
@@ -145,25 +147,20 @@ def _observation_card(observation):
             f'</div>')
 
 
-def build_dashboard(payload, output_dir=None, valid_date=None):
-    """Write ``dashboard.html`` (+ standalone map PNG) from a bulletin payload."""
-    output_dir = Path(output_dir or config.OUTPUT_DIR)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    valid = payload["valid"]
-    stamp = valid.replace("-", "")
-
+def _build_subs(payload, output_dir, write_png):
+    """Compute the template substitutions (renders + optionally saves the map)."""
     forecast, thresholds = payload["forecast"], payload["thresholds"]
     risk, observation = payload["risk"], payload.get("observation")
     level = payload["alert_level"]
-    color = ALERT_COLOR.get(level, "#64748b")
+    stamp = payload["valid"].replace("-", "")
 
     rendered = _render_map(risk.get("geotiff", ""))
     if rendered:
         png_bytes, map_uri, b = rendered
-        (output_dir / f"risk_map_{stamp}.png").write_bytes(png_bytes)
-        extent = (f"{b.left:g}–{b.right:g}°E, "
-                  f"{-b.top:g}–{-b.bottom:g}°S · EPSG:4326 "
-                  f"· ~{config.CELL:g} m")
+        if write_png:
+            (Path(output_dir) / f"risk_map_{stamp}.png").write_bytes(png_bytes)
+        extent = (f"{b.left:g}–{b.right:g}°E, {-b.top:g}–{-b.bottom:g}°S "
+                  f"· EPSG:4326 · ~{config.CELL:g} m")
         map_html = (f'<figure class="map"><img alt="Flood risk map" src="{map_uri}">'
                     f'{_legend()}<figcaption>{extent}</figcaption></figure>')
     else:
@@ -182,24 +179,39 @@ def build_dashboard(payload, output_dir=None, valid_date=None):
               "Moderate-risk area", f"{risk['moderate_risk_fraction']:.1%} of window"),
     ])
 
-    html = _TEMPLATE.format(
-        valid=valid, issued=payload["issued"], level=level, color=color,
-        blurb=ALERT_BLURB.get(level, ""), tiles=tiles, map_html=map_html,
-        forecast_source=forecast["source"],
-        thresholds_source=thresholds.get("source", "CHIRPS"),
-        observation_card=_observation_card(observation),
-    )
+    return {
+        "valid": payload["valid"], "issued": payload["issued"], "level": level,
+        "color": ALERT_COLOR.get(level, "#64748b"),
+        "blurb": ALERT_BLURB.get(level, ""), "tiles": tiles, "map_html": map_html,
+        "forecast_source": forecast["source"],
+        "thresholds_source": thresholds.get("source", "CHIRPS"),
+        "observation_card": _observation_card(observation),
+    }
+
+
+def render_fragment(payload, output_dir=None, write_png=False):
+    """Return the dashboard as an embeddable ``<style>`` + markup string."""
+    subs = _build_subs(payload, output_dir or config.OUTPUT_DIR, write_png)
+    return _STYLE.format(color=subs["color"]) + "\n" + _BODY.format(**subs)
+
+
+def build_dashboard(payload, output_dir=None, valid_date=None):
+    """Write ``dashboard.html`` (+ standalone map PNG) from a bulletin payload."""
+    output_dir = Path(output_dir or config.OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    subs = _build_subs(payload, output_dir, write_png=True)
+    html = _DOC.format(title_date=subs["valid"],
+                       style=_STYLE.format(color=subs["color"]),
+                       body=_BODY.format(**subs))
     out = output_dir / "dashboard.html"
     out.write_text(html, encoding="utf-8")
     log.info("wrote %s", out)
     return out
 
 
-_TEMPLATE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Limpopo Flood Risk — {valid}</title>
-<style>
+# --- templates --------------------------------------------------------------
+_STYLE = """<style>
   :root {{
     --bg:#f6f7f9; --surface:#ffffff; --ink:#1a2230; --muted:#61708a;
     --line:#e6e9ef; --accent:{color};
@@ -208,59 +220,63 @@ _TEMPLATE = """<!doctype html>
     :root {{ --bg:#0e1420; --surface:#161d2b; --ink:#e8edf5; --muted:#93a1b8;
              --line:#26303f; }}
   }}
-  * {{ box-sizing:border-box; }}
-  body {{ margin:0; background:var(--bg); color:var(--ink);
+  :root[data-theme="dark"] {{ --bg:#0e1420; --surface:#161d2b; --ink:#e8edf5;
+    --muted:#93a1b8; --line:#26303f; }}
+  :root[data-theme="light"] {{ --bg:#f6f7f9; --surface:#ffffff; --ink:#1a2230;
+    --muted:#61708a; --line:#e6e9ef; }}
+  .fr * {{ box-sizing:border-box; }}
+  .fr {{ color:var(--ink); background:var(--bg); min-height:100vh;
     font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }}
-  .wrap {{ max-width:1040px; margin:0 auto; padding:28px 20px 56px; }}
-  header {{ display:flex; justify-content:space-between; align-items:baseline;
+  .fr .wrap {{ max-width:1040px; margin:0 auto; padding:28px 20px 56px; }}
+  .fr header {{ display:flex; justify-content:space-between; align-items:baseline;
     flex-wrap:wrap; gap:8px; margin-bottom:18px; }}
-  h1 {{ font-size:22px; margin:0; letter-spacing:-.01em; }}
-  .place {{ color:var(--muted); font-size:13px; }}
-  .dates {{ color:var(--muted); font-size:13px; text-align:right; }}
-  .banner {{ display:flex; align-items:center; gap:16px; background:var(--surface);
+  .fr h1 {{ font-size:22px; margin:0; letter-spacing:-.01em; }}
+  .fr .place {{ color:var(--muted); font-size:13px; }}
+  .fr .dates {{ color:var(--muted); font-size:13px; text-align:right; }}
+  .fr .banner {{ display:flex; align-items:center; gap:16px; background:var(--surface);
     border:1px solid var(--line); border-left:6px solid var(--accent);
     border-radius:12px; padding:16px 20px; margin-bottom:20px; }}
-  .badge {{ background:var(--accent); color:#fff; font-weight:700; font-size:15px;
+  .fr .badge {{ background:var(--accent); color:#fff; font-weight:700; font-size:15px;
     letter-spacing:.08em; padding:8px 16px; border-radius:8px; white-space:nowrap; }}
-  .banner p {{ margin:0; color:var(--ink); }}
-  .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  .fr .banner p {{ margin:0; color:var(--ink); }}
+  .fr .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
     gap:12px; margin-bottom:22px; }}
-  .tile {{ background:var(--surface); border:1px solid var(--line);
+  .fr .tile {{ background:var(--surface); border:1px solid var(--line);
     border-radius:12px; padding:16px; }}
-  .tile .val {{ font-size:26px; font-weight:700; letter-spacing:-.02em; }}
-  .tile .val .u {{ font-size:14px; font-weight:600; color:var(--muted); }}
-  .tile .lab {{ font-size:13px; font-weight:600; margin-top:2px; }}
-  .tile .sub {{ font-size:12px; color:var(--muted); margin-top:2px; }}
-  .map {{ margin:0 0 22px; background:var(--surface); border:1px solid var(--line);
+  .fr .tile .val {{ font-size:26px; font-weight:700; letter-spacing:-.02em; }}
+  .fr .tile .val .u {{ font-size:14px; font-weight:600; color:var(--muted); }}
+  .fr .tile .lab {{ font-size:13px; font-weight:600; margin-top:2px; }}
+  .fr .tile .sub {{ font-size:12px; color:var(--muted); margin-top:2px; }}
+  .fr .map {{ margin:0 0 22px; background:var(--surface); border:1px solid var(--line);
     border-radius:12px; padding:14px; }}
-  .map img {{ width:100%; height:auto; border-radius:8px; display:block;
-    image-rendering:auto; }}
-  .map figcaption {{ color:var(--muted); font-size:12px; margin-top:10px;
+  .fr .map img {{ width:100%; height:auto; border-radius:8px; display:block; }}
+  .fr .map figcaption {{ color:var(--muted); font-size:12px; margin-top:10px;
     text-align:center; }}
-  .nomap {{ padding:60px 20px; text-align:center; color:var(--muted); }}
-  .legend {{ margin-top:12px; font-size:12px; }}
-  .lrow {{ display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  .fr .nomap {{ padding:60px 20px; text-align:center; color:var(--muted); }}
+  .fr .legend {{ margin-top:12px; font-size:12px; }}
+  .fr .lrow {{ display:flex; align-items:center; gap:10px; flex-wrap:wrap;
     margin-top:8px; color:var(--muted); }}
-  .lname {{ font-weight:600; color:var(--ink); }}
-  .bar {{ flex:1; min-width:120px; height:12px; border-radius:6px;
+  .fr .lname {{ font-weight:600; color:var(--ink); }}
+  .fr .bar {{ flex:1; min-width:120px; height:12px; border-radius:6px;
     border:1px solid var(--line); }}
-  .swatches {{ gap:18px; }}
-  .swatches span {{ display:flex; align-items:center; gap:6px; }}
-  .swatches i {{ width:14px; height:14px; border-radius:4px; display:inline-block;
+  .fr .swatches {{ gap:18px; }}
+  .fr .swatches span {{ display:flex; align-items:center; gap:6px; }}
+  .fr .swatches i {{ width:14px; height:14px; border-radius:4px; display:inline-block;
     border:1px solid rgba(0,0,0,.15); }}
-  .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  .fr .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
     gap:12px; }}
-  .card {{ background:var(--surface); border:1px solid var(--line);
+  .fr .card {{ background:var(--surface); border:1px solid var(--line);
     border-radius:12px; padding:16px; }}
-  .card h3 {{ margin:0 0 8px; font-size:13px; text-transform:uppercase;
+  .fr .card h3 {{ margin:0 0 8px; font-size:13px; text-transform:uppercase;
     letter-spacing:.06em; color:var(--muted); }}
-  .card p {{ margin:0 0 6px; }}
-  .muted {{ color:var(--muted); font-size:13px; }}
-  footer {{ color:var(--muted); font-size:12px; margin-top:26px;
+  .fr .card p {{ margin:0 0 6px; }}
+  .fr .muted {{ color:var(--muted); font-size:13px; }}
+  .fr footer {{ color:var(--muted); font-size:12px; margin-top:26px;
     border-top:1px solid var(--line); padding-top:14px; }}
-  code {{ background:var(--line); padding:1px 5px; border-radius:4px; }}
-</style></head>
-<body><div class="wrap">
+  .fr code {{ background:var(--line); padding:1px 5px; border-radius:4px; }}
+</style>"""
+
+_BODY = """<div class="fr"><div class="wrap">
   <header>
     <div><h1>Limpopo Flood Risk</h1>
       <div class="place">Lower Limpopo floodplain · Chibuto reach</div></div>
@@ -289,5 +305,15 @@ _TEMPLATE = """<!doctype html>
     Uncalibrated against observed inundation — ranks pixels, not a probability.
     Generated by the <code>floodrisk</code> pipeline.
   </footer>
-</div></body></html>
+</div></div>"""
+
+_DOC = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limpopo Flood Risk — {title_date}</title>
+<style>body {{ margin:0; background:var(--bg); }}</style>
+{style}
+</head><body>
+{body}
+</body></html>
 """
