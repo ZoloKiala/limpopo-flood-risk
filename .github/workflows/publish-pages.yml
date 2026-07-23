@@ -1,0 +1,67 @@
+name: Publish dashboard to Pages
+
+# Publishes outputs/dashboard.html to GitHub Pages. Runs after each successful
+# "Daily flood risk" run (so the site tracks the latest bulletin), and can be
+# triggered manually. Reuses the cached static products; builds them if the
+# cache is cold.
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Daily flood risk"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore static products (susceptibility + thresholds + SAR model)
+        uses: actions/cache@v4
+        with:
+          path: static
+          key: static-v1-${{ github.run_id }}
+          restore-keys: |
+            static-v1
+
+      - name: Build static products if missing (cold cache only)
+        run: python -m floodrisk build-static --if-missing
+
+      - name: Produce daily product + dashboard
+        run: python -m floodrisk daily
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp outputs/dashboard.html _site/index.html
+          cp outputs/risk_map_*.png _site/ 2>/dev/null || true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
