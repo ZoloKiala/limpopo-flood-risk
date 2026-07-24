@@ -188,10 +188,23 @@ def build_thresholds(static_dir):
         "source": "CHIRPS v2.0 daily-improved 0.25deg",
         "note": "percentiles over rainy days (basin mean > 1 mm)",
     }
-    # GloFAS discharge baseline at the gauge point (for the discharge factor).
+    (static_dir / "thresholds.json").write_text(json.dumps(thresholds, indent=2))
+    log.info("thresholds: %s", thresholds)
+    build_discharge_baseline(static_dir)
+
+
+def build_discharge_baseline(static_dir):
+    """Add/refresh the GloFAS discharge P95 in thresholds.json (no CHIRPS needed).
+
+    Merges into an existing thresholds.json so it can run standalone
+    (`build-static --only discharge`) without re-downloading the CHIRPS record.
+    """
+    from .forecast import _get_json
+
+    path = static_dir / "thresholds.json"
+    thresholds = json.loads(path.read_text()) if path.exists() else {}
+    lon, lat = config.DISCHARGE_POINT
     try:
-        from .forecast import _get_json
-        lon, lat = config.DISCHARGE_POINT
         dj = _get_json(config.FLOOD_API_URL, {
             "latitude": lat, "longitude": lon, "daily": "river_discharge",
             "start_date": "2000-01-01", "end_date": "2023-12-31",
@@ -206,9 +219,7 @@ def build_thresholds(static_dir):
                  thresholds["discharge_p95_m3s"], q.size)
     except Exception as e:  # noqa: BLE001 - discharge baseline is best-effort
         log.warning("discharge baseline unavailable (rain-only coupling): %s", e)
-
-    (static_dir / "thresholds.json").write_text(json.dumps(thresholds, indent=2))
-    log.info("thresholds: %s", thresholds)
+    path.write_text(json.dumps(thresholds, indent=2))
 
 
 def _load_split(name):
@@ -309,6 +320,9 @@ def build_static(static_dir=None, only_missing=False, only=None):
     exist, e.g. restored from cache)."""
     static_dir = static_dir or config.STATIC_DIR
     static_dir.mkdir(parents=True, exist_ok=True)
+    if only == "discharge":            # inject discharge P95 without touching CHIRPS
+        build_discharge_baseline(static_dir)
+        return
     steps = [
         ("susceptibility", "susceptibility.tif", build_susceptibility),
         ("thresholds", "thresholds.json", build_thresholds),

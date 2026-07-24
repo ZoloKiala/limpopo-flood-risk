@@ -156,8 +156,10 @@ def main():
     p1 = sub.add_parser("build-static", help="train susceptibility + thresholds")
     p1.add_argument("--if-missing", action="store_true",
                     help="skip if static products already exist")
-    p1.add_argument("--only", choices=["susceptibility", "thresholds", "sar"],
-                    help="build only this component (others must already exist)")
+    p1.add_argument("--only",
+                    choices=["susceptibility", "thresholds", "sar", "discharge"],
+                    help="build only this component (others must already exist); "
+                         "'discharge' injects the GloFAS P95 into thresholds.json")
     p1.set_defaults(func=cmd_build_static)
 
     p2 = sub.add_parser("daily", help="produce a risk GeoTIFF + bulletin")

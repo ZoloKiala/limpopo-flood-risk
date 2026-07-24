@@ -11,7 +11,7 @@ on:
       component:
         description: "Which product to (re)build (others are restored from cache)"
         type: choice
-        options: [all, susceptibility, thresholds, sar]
+        options: [all, susceptibility, thresholds, sar, discharge]
         default: all
 
 permissions:
