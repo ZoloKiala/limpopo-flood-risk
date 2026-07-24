@@ -9,19 +9,21 @@ OUTPUT_DIR = Path("outputs")    # daily products
 LON_MIN, LON_MAX = 26.0, 35.0
 LAT_MIN, LAT_MAX = -26.0, -20.0
 
-# -------------------------------------------- susceptibility window (WHERE)
-# One Copernicus GLO-30 tile: 33-34E, 25-24S (lower Limpopo floodplain)
-DEM_URL = (
+# ----------------------------------------- susceptibility mosaic (WHERE)
+# Lower Limpopo floodplain, covered by a grid of Copernicus GLO-30 1-deg DEM
+# tiles mosaicked into one susceptibility raster. A tile is named by its SW
+# corner degree: "S{|lat|}_00_E{lon}_00" spans [lat, lat+1) N, [lon, lon+1) E.
+# build_susceptibility() derives the tile list from MOSAIC_BBOX.
+DEM_TILE_URL = (
     "https://copernicus-dem-30m.s3.amazonaws.com/"
-    "Copernicus_DSM_COG_10_S25_00_E033_00_DEM/"
-    "Copernicus_DSM_COG_10_S25_00_E033_00_DEM.tif"
+    "Copernicus_DSM_COG_10_{tile}_DEM/Copernicus_DSM_COG_10_{tile}_DEM.tif"
 )
+MOSAIC_BBOX = (32.0, 34.0, -26.0, -24.0)   # lon_min, lon_max, lat_min, lat_max
 GSW_URL = (
     "https://storage.googleapis.com/global-surface-water/"
     "downloads2021/occurrence/occurrence_30E_20Sv1_4_2021.tif"
 )
-WINDOW_BBOX = (33.0, 34.0, -25.0, -24.0)   # lon_min, lon_max, lat_min, lat_max
-SIZE = 3584          # px (28 x 128) cropped from the 3600^2 DEM tile
+WINDOW_BBOX = (33.0, 34.0, -25.0, -24.0)   # core reach, for the CHIRPS window pct
 TILE = 128
 PATCH = 16
 CELL = 30.0          # ~meters per pixel

@@ -37,7 +37,7 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300   # cold-cache build does the full mosaic + SAR
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

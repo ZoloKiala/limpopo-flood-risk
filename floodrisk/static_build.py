@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 import rasterio
-from rasterio.windows import Window, from_bounds
+from rasterio.windows import from_bounds
 from scipy import ndimage
 import tensorflow as tf
 
@@ -27,21 +27,52 @@ def _norm(x):
     return np.clip((x - lo) / (hi - lo + 1e-6), 0, 1).astype("float32")
 
 
+def _dem_tokens(bbox):
+    """Copernicus GLO-30 tile tokens covering bbox (lon_min, lon_max, lat_min, lat_max).
+
+    A tile token "S{|lat|}_00_E{lon}_00" has SW corner (lon, lat) and spans one
+    degree N and E. We enumerate the integer SW corners inside the bbox.
+    """
+    lon_min, lon_max, lat_min, lat_max = bbox
+    tokens = []
+    for lat0 in range(int(np.floor(lat_min)), int(np.ceil(lat_max))):
+        ns = f"S{-lat0:02d}" if lat0 < 0 else f"N{lat0:02d}"
+        for lon0 in range(int(np.floor(lon_min)), int(np.ceil(lon_max))):
+            ew = f"E{lon0:03d}" if lon0 >= 0 else f"W{-lon0:03d}"
+            tokens.append(f"{ns}_00_{ew}_00")
+    return tokens
+
+
 def build_susceptibility(static_dir):
-    size, tile = config.SIZE, config.TILE
+    tile = config.TILE
+    from rasterio.merge import merge
+    from rasterio.transform import array_bounds
 
-    log.info("downloading DEM tile ...")
-    dem_path = tf.keras.utils.get_file("dem_S25_E033.tif", config.DEM_URL)
-    with rasterio.open(dem_path) as src:
-        win = Window(8, 8, size, size)
-        elev = src.read(1, window=win).astype("float32")
-        transform, crs = src.window_transform(win), src.crs
-        bounds = rasterio.windows.bounds(win, src.transform)
+    tokens = _dem_tokens(config.MOSAIC_BBOX)
+    log.info("mosaicking %d DEM tiles: %s", len(tokens), ", ".join(tokens))
+    srcs = []
+    for tok in tokens:
+        url = config.DEM_TILE_URL.format(tile=tok)
+        srcs.append(rasterio.open(tf.keras.utils.get_file(f"dem_{tok}.tif", url)))
+    mosaic, mtransform = merge(srcs)
+    crs = srcs[0].crs
+    for s in srcs:
+        s.close()
 
-    log.info("streaming GSW occurrence window ...")
+    # Crop each dimension to a whole number of ViT tiles (top-left origin kept).
+    full = mosaic[0].astype("float32")
+    h = (full.shape[0] // tile) * tile
+    w = (full.shape[1] // tile) * tile
+    elev = np.ascontiguousarray(full[:h, :w])
+    del mosaic, full
+    transform = mtransform
+    bounds = array_bounds(h, w, transform)          # (left, bottom, right, top)
+    log.info("mosaic %d x %d px, extent %s", w, h, tuple(round(b, 3) for b in bounds))
+
+    log.info("streaming GSW occurrence over the mosaic ...")
     with rasterio.open(config.GSW_URL) as src:
         occ = src.read(1, window=from_bounds(*bounds, src.transform),
-                       out_shape=(size, size),
+                       out_shape=(h, w),
                        resampling=rasterio.enums.Resampling.nearest)
 
     valid = occ != 255
@@ -63,34 +94,37 @@ def build_susceptibility(static_dir):
         _norm(np.log1p(dist_px * config.CELL / 1000.0)),
     ], axis=-1)
 
-    n = size // tile
-    X = features.reshape(n, tile, n, tile, 6).swapaxes(1, 2).reshape(-1, tile, tile, 6)
-    Y = label.reshape(n, tile, n, tile, 1).swapaxes(1, 2).reshape(-1, tile, tile, 1)
-    col = np.tile(np.arange(n), n)
-    tr, va = col <= 21, col >= 22                              # spatial split
+    ny, nx = h // tile, w // tile
+    X = features.reshape(ny, tile, nx, tile, 6).swapaxes(1, 2).reshape(-1, tile, tile, 6)
+    Y = label.reshape(ny, tile, nx, tile, 1).swapaxes(1, 2).reshape(-1, tile, tile, 1)
+    col = np.tile(np.arange(nx), ny)                           # tile column, row-major
+    split = max(1, int(nx * 0.8))
+    tr, va = col < split, col >= split                         # spatial (E strip) split
 
     model = PatchViT(tile, tile, config.PATCH, 6)
     model(tf.zeros((1, tile, tile, 6)))
     model.compile(optimizer=tf.keras.optimizers.AdamW(3e-4, weight_decay=1e-4),
                   loss=masked_bce)
-    log.info("training susceptibility ViT (%d epochs) ...", config.SUS_EPOCHS)
+    log.info("training susceptibility ViT (%d epochs, %d/%d train/val tiles) ...",
+             config.SUS_EPOCHS, int(tr.sum()), int(va.sum()))
     model.fit(X[tr], Y[tr], validation_data=(X[va], Y[va]),
               batch_size=config.SUS_BATCH, epochs=config.SUS_EPOCHS, verbose=2)
 
     suscept = (tf.sigmoid(model.predict(X, batch_size=config.SUS_BATCH))
                .numpy()[..., 0]
-               .reshape(n, n, tile, tile).swapaxes(1, 2).reshape(size, size))
+               .reshape(ny, nx, tile, tile).swapaxes(1, 2).reshape(h, w))
 
     out = static_dir / "susceptibility.tif"
-    with rasterio.open(out, "w", driver="GTiff", height=size, width=size,
+    with rasterio.open(out, "w", driver="GTiff", height=h, width=w,
                        count=2, dtype="float32", crs=crs, transform=transform,
-                       compress="deflate", predictor=3) as dst:
+                       compress="deflate", predictor=3, tiled=True,
+                       blockxsize=256, blockysize=256) as dst:
         dst.write(suscept.astype("float32"), 1)
         dst.write(permanent.astype("float32"), 2)
         dst.set_band_description(1, "flood susceptibility 0-1")
         dst.set_band_description(2, "permanent water mask")
     model.save_weights(static_dir / "sus_model.weights.h5")
-    log.info("wrote %s", out)
+    log.info("wrote %s (%d x %d)", out, w, h)
 
 
 def build_thresholds(static_dir):

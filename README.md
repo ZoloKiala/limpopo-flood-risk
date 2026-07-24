@@ -80,9 +80,10 @@ Notes:
 
 ## Configuration
 
-Everything tunable lives in `floodrisk/config.py`: study window (swap the DEM
-tile + bbox to cover another reach), risk class thresholds, S2 monitoring
-point, model size, alert thresholds. After changing the window or model,
+Everything tunable lives in `floodrisk/config.py`: susceptibility mosaic extent
+(`MOSAIC_BBOX` — the DEM tiles are derived and mosaicked automatically), risk
+class thresholds, SAR monitoring point, model size, alert thresholds. After
+changing the mosaic or model,
 re-run **Rebuild static products**.
 
 ## Design decisions
@@ -138,8 +139,14 @@ re-run **Rebuild static products**.
   terrain-corrected product (Sentinel-1 RTC) or SNAP calibration is the rigorous
   upgrade. SAR open-water detection is also confounded by wind-roughened water,
   saturated soil, and radar shadow/layover — treat it as a cross-check, not truth.
-- Single 1° window. For basin-wide coverage, loop `build_susceptibility` over
-  DEM tiles and mosaic.
+- **Susceptibility now mosaics a 2×2 DEM-tile window** (`MOSAIC_BBOX`, lon 32–34°E,
+  lat 24–26°S — the lower Limpopo floodplain from Chókwè/Guijá to the Xai-Xai
+  delta). The ViT trains once and is applied across the mosaic. Extending much
+  further on the free CI runner is memory/time-bound; a bigger basin needs
+  chunked/tiled inference or a paid runner.
+- **Rain factor is a single scalar** applied across the whole mosaic — spatially
+  uniform. Basin-wide rainfall varies, so couple to a gridded forecast (or GloFAS)
+  before treating sub-regions differently.
 
 ## Roadmap
 
@@ -148,7 +155,9 @@ re-run **Rebuild static products**.
    Next: a calibrated Sentinel-1 RTC input, and a wider/mosaicked S1 footprint
    so the observation floors risk across the whole window, not just the reach.
 2. **GloFAS coupling** — discharge percentile as a second factor with routing lag.
-3. **Multi-window mosaic** — full lower-basin coverage.
+3. ~~**Multi-window mosaic** — full lower-basin coverage.~~ **Done** for a 2×2
+   tile window (lower Limpopo floodplain). Next: larger extent via chunked
+   inference + spatially-varying rain factor.
 4. **Bulletin-level verification** — replay 2000/2013/2017/2021/2023 events,
    count hits/misses/false alarms, tune thresholds.
 
