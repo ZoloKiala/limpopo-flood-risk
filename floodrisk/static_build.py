@@ -22,6 +22,23 @@ from .models import PatchViT, masked_bce
 log = logging.getLogger(__name__)
 
 
+def _get_file(fname, url, tries=3):
+    """tf.keras.utils.get_file with retry+backoff (IRI/CHIRPS + S3 can flake)."""
+    import time
+
+    last = None
+    for attempt in range(tries):
+        try:
+            return tf.keras.utils.get_file(fname, url)
+        except Exception as e:  # noqa: BLE001 - retry transient download failures
+            last = e
+            log.warning("download %s failed (attempt %d/%d): %s",
+                        fname, attempt + 1, tries, e)
+            if attempt < tries - 1:
+                time.sleep(5 + 10 * attempt)   # 5s, 15s
+    raise RuntimeError(f"could not download {url}: {last}")
+
+
 def _norm(x):
     lo, hi = np.percentile(x, [2, 98])
     return np.clip((x - lo) / (hi - lo + 1e-6), 0, 1).astype("float32")
@@ -53,7 +70,7 @@ def build_susceptibility(static_dir):
     srcs = []
     for tok in tokens:
         url = config.DEM_TILE_URL.format(tile=tok)
-        srcs.append(rasterio.open(tf.keras.utils.get_file(f"dem_{tok}.tif", url)))
+        srcs.append(rasterio.open(_get_file(f"dem_{tok}.tif", url)))
     mosaic, mtransform = merge(srcs)
     crs = srcs[0].crs
     for s in srcs:
@@ -133,7 +150,7 @@ def build_thresholds(static_dir):
     import xarray as xr
 
     log.info("downloading CHIRPS record (~50 MB) ...")
-    path = tf.keras.utils.get_file("chirps_limpopo_daily.nc", config.CHIRPS_URL)
+    path = _get_file("chirps_limpopo_daily.nc", config.CHIRPS_URL)
     try:
         ds = xr.open_dataset(path)
     except Exception:
@@ -255,18 +272,21 @@ def build_sar_model(static_dir):
     log.info("SAR model provenance: %s", provenance)
 
 
-def build_static(static_dir=None, only_missing=False):
+def build_static(static_dir=None, only_missing=False, only=None):
+    """Build the static products. ``only`` limits to one component
+    (susceptibility|thresholds|sar), leaving the others as-is (must already
+    exist, e.g. restored from cache)."""
     static_dir = static_dir or config.STATIC_DIR
     static_dir.mkdir(parents=True, exist_ok=True)
-    have_sus = (static_dir / "susceptibility.tif").exists()
-    have_thr = (static_dir / "thresholds.json").exists()
-    have_sar = (static_dir / "sar_model.weights.h5").exists()
-    if only_missing and have_sus and have_thr and have_sar:
-        log.info("static products present - skipping build")
-        return
-    if not (only_missing and have_sus):
-        build_susceptibility(static_dir)
-    if not (only_missing and have_thr):
-        build_thresholds(static_dir)
-    if not (only_missing and have_sar):
-        build_sar_model(static_dir)
+    steps = [
+        ("susceptibility", "susceptibility.tif", build_susceptibility),
+        ("thresholds", "thresholds.json", build_thresholds),
+        ("sar", "sar_model.weights.h5", build_sar_model),
+    ]
+    for name, fname, fn in steps:
+        if only and name != only:
+            continue
+        if only_missing and (static_dir / fname).exists():
+            log.info("%s present - skipping", name)
+            continue
+        fn(static_dir)

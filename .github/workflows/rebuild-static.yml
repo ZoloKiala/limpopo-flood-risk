@@ -6,7 +6,13 @@ name: Rebuild static products
 # refresh GSW/CHIRPS-derived products (annual is plenty).
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      component:
+        description: "Which product to (re)build (others are restored from cache)"
+        type: choice
+        options: [all, susceptibility, thresholds, sar]
+        default: all
 
 permissions:
   contents: read
@@ -26,8 +32,25 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build static products (full rebuild)
-        run: python -m floodrisk build-static
+      - name: Restore existing static products (partial rebuild keeps the rest)
+        if: ${{ github.event.inputs.component != '' && github.event.inputs.component != 'all' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: static
+          key: static-restore-${{ github.run_id }}
+          restore-keys: |
+            static-v1
+
+      - name: Build static products
+        run: |
+          C="${{ github.event.inputs.component }}"
+          if [ -n "$C" ] && [ "$C" != "all" ]; then
+            echo "rebuilding only: $C"
+            python -m floodrisk build-static --only "$C"
+          else
+            echo "full rebuild"
+            python -m floodrisk build-static
+          fi
 
       - name: Save to cache
         uses: actions/cache/save@v4

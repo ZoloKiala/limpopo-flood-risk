@@ -20,7 +20,7 @@ log = logging.getLogger("floodrisk")
 
 def cmd_build_static(args):
     from .static_build import build_static
-    build_static(only_missing=args.if_missing)
+    build_static(only_missing=args.if_missing, only=getattr(args, "only", None))
 
 
 def cmd_daily(args):
@@ -147,6 +147,8 @@ def main():
     p1 = sub.add_parser("build-static", help="train susceptibility + thresholds")
     p1.add_argument("--if-missing", action="store_true",
                     help="skip if static products already exist")
+    p1.add_argument("--only", choices=["susceptibility", "thresholds", "sar"],
+                    help="build only this component (others must already exist)")
     p1.set_defaults(func=cmd_build_static)
 
     p2 = sub.add_parser("daily", help="produce a risk GeoTIFF + bulletin")
