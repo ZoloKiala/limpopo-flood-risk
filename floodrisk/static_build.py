@@ -188,6 +188,25 @@ def build_thresholds(static_dir):
         "source": "CHIRPS v2.0 daily-improved 0.25deg",
         "note": "percentiles over rainy days (basin mean > 1 mm)",
     }
+    # GloFAS discharge baseline at the gauge point (for the discharge factor).
+    try:
+        from .forecast import _get_json
+        lon, lat = config.DISCHARGE_POINT
+        dj = _get_json(config.FLOOD_API_URL, {
+            "latitude": lat, "longitude": lon, "daily": "river_discharge",
+            "start_date": "2000-01-01", "end_date": "2023-12-31",
+            "timezone": "UTC"})
+        q = np.array([v for v in dj["daily"]["river_discharge"] if v is not None],
+                     dtype="float64")
+        thresholds["discharge_p95_m3s"] = float(np.percentile(q, 95))
+        thresholds["discharge_point"] = [lon, lat]
+        thresholds["discharge_n_days"] = int(q.size)
+        thresholds["discharge_source"] = "GloFAS via Open-Meteo Flood API (2000-2023)"
+        log.info("discharge P95 = %.0f m3/s over %d days",
+                 thresholds["discharge_p95_m3s"], q.size)
+    except Exception as e:  # noqa: BLE001 - discharge baseline is best-effort
+        log.warning("discharge baseline unavailable (rain-only coupling): %s", e)
+
     (static_dir / "thresholds.json").write_text(json.dumps(thresholds, indent=2))
     log.info("thresholds: %s", thresholds)
 

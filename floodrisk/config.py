@@ -51,6 +51,12 @@ OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_ARCHIVE_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 OPEN_METEO_MODEL = "gfs_global"
 
+# GloFAS river discharge via Open-Meteo's free Flood API (keyless). Discharge
+# integrates upstream rain + routing, so it carries the days-later flood wave
+# that local rain misses. The point must sit on the GloFAS river network.
+FLOOD_API_URL = "https://flood-api.open-meteo.com/v1/flood"
+DISCHARGE_POINT = (33.40, -24.70)   # Limpopo at the Chibuto reach
+
 # --------------------------------------- Sentinel-1 SAR (NOW layer)
 # All-weather "what's wet now" from C-band backscatter, segmented by a ViT
 # trained on Sen1Floods11. Sentinel-1 sees through the cyclone cloud that

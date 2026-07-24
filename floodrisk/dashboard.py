@@ -278,12 +278,19 @@ def _build_subs(payload, output_dir, write_png, interactive, nav=False):
     else:
         map_html = _map_static(geotiff, output_dir, write_png)
 
+    factor = risk.get("factor", risk.get("rain_factor", 0.0))
+    driver = risk.get("driver", "rain")
+    disch = risk.get("discharge") or {}
+    q = disch.get("river_discharge_m3s")
+    q_val = (f"{q:,.0f} <span class=u>m³/s</span>" if q is not None else "—")
+    q_sub = (f"factor {risk.get('discharge_factor', 0):.2f}" if q is not None
+             else "GloFAS n/a")
     tiles = "".join([
-        _tile(f"{risk['rain_factor']:.2f}", "Rain factor", "forecast ÷ P95"),
-        _tile(f"{forecast['basin_mm']:.1f} <span class=u>mm</span>",
-              "Basin rainfall", f"95th pct {thresholds['basin_p95_mm']:.1f} mm"),
+        _tile(f"{factor:.2f}", "Risk factor", f"max(rain, discharge) · {driver}"),
+        _tile(q_val, "River discharge", q_sub),
+        _tile(f"{risk.get('rain_factor', 0):.2f}", "Rain factor", "rain ÷ P95"),
         _tile(f"{forecast['window_mm']:.1f} <span class=u>mm</span>",
-              "Floodplain window", f"95th pct {thresholds['window_p95_mm']:.1f} mm"),
+              "Floodplain rain", f"95th pct {thresholds['window_p95_mm']:.1f} mm"),
         _tile(f"{risk['high_risk_km2']:,.0f} <span class=u>km²</span>",
               "High-risk area", f"{risk['high_risk_fraction']:.1%} of window"),
         _tile(f"{risk['moderate_risk_km2']:,.0f} <span class=u>km²</span>",

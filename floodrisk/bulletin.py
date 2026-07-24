@@ -3,28 +3,40 @@ import datetime as dt
 import json
 
 
-def alert_level(rain_factor):
-    if rain_factor >= 1.0:
+def alert_level(factor):
+    if factor >= 1.0:
         return "HIGH"
-    if rain_factor >= 0.6:
+    if factor >= 0.6:
         return "MODERATE"
     return "LOW"
 
 
 def build(issue_date, valid_date, forecast, thresholds, stats, observation):
-    level = alert_level(stats["rain_factor"])
+    level = alert_level(stats["factor"])
+    discharge = stats.get("discharge")
+    q95 = thresholds.get("discharge_p95_m3s")
+    if discharge:
+        q_line = (f" River discharge         : "
+                  f"{discharge['river_discharge_m3s']:,.0f} m3/s"
+                  + (f" (95th pct = {q95:,.0f})" if q95 else "")
+                  + f" -> factor {stats.get('discharge_factor', 0):.2f}")
+    else:
+        q_line = " River discharge         : unavailable (GloFAS/Flood API)"
     lines = [
         "=" * 62,
         f" LIMPOPO FLOOD RISK BULLETIN   issued {issue_date:%Y-%m-%d}, "
         f"valid {valid_date:%Y-%m-%d}",
         "=" * 62,
-        f" Alert level             : {level}",
+        f" Alert level             : {level}  "
+        f"({stats.get('driver', 'rain')}-driven)",
+        f" Risk factor (max)       : {stats['factor']:.2f}",
         f" Forecast source         : {forecast['source']}",
         f" Basin rainfall forecast : {forecast['basin_mm']:5.1f} mm/day "
         f"(95th pct = {thresholds['basin_p95_mm']:.1f})",
         f" Floodplain window       : {forecast['window_mm']:5.1f} mm/day "
         f"(95th pct = {thresholds['window_p95_mm']:.1f})",
         f" Rain factor             : {stats['rain_factor']:.2f}",
+        q_line,
         f" Area at high risk       : {stats['high_risk_fraction']:.1%} "
         f"({stats['high_risk_km2']:,.0f} km2)",
         f" Area at moderate risk   : {stats['moderate_risk_fraction']:.1%} "

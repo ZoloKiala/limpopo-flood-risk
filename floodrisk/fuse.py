@@ -19,6 +19,22 @@ def compute_rain_factor(forecast, thresholds):
     return float(np.clip(value / max(p95, 1e-6), 0.0, config.RAIN_FACTOR_CAP))
 
 
+def compute_discharge_factor(discharge, thresholds):
+    """How exceptional is river discharge vs its historical 95th percentile?
+
+    Returns 0.0 when discharge is unavailable or no baseline exists (so the
+    coupling degrades to rain-only)."""
+    import math
+
+    if not discharge or not thresholds.get("discharge_p95_m3s"):
+        return 0.0
+    q = discharge.get("river_discharge_m3s")
+    if q is None or math.isnan(q):
+        return 0.0
+    p95 = thresholds["discharge_p95_m3s"]
+    return float(np.clip(q / max(p95, 1e-6), 0.0, config.RAIN_FACTOR_CAP))
+
+
 def _observed_water_on_grid(observation, profile):
     """Reproject the SAR NOW water probability onto the risk grid.
 
@@ -49,7 +65,7 @@ def _observed_water_on_grid(observation, profile):
     return prob, cov > 0.0
 
 
-def fuse(rain_factor, valid_date, observation=None, static_dir=None,
+def fuse(factor, valid_date, observation=None, static_dir=None,
          output_dir=None):
     static_dir = static_dir or config.STATIC_DIR
     output_dir = output_dir or config.OUTPUT_DIR
@@ -60,7 +76,7 @@ def fuse(rain_factor, valid_date, observation=None, static_dir=None,
         permanent = src.read(2).astype(bool)
         profile = src.profile
 
-    risk = np.clip(suscept * rain_factor, 0.0, 1.0).astype("float32")
+    risk = np.clip(suscept * factor, 0.0, 1.0).astype("float32")
 
     # NOW layer as a floor on risk: SAR-confirmed open water (not the permanent
     # river) means it is *already* wet, so the index cannot read lower than the
@@ -97,7 +113,7 @@ def fuse(rain_factor, valid_date, observation=None, static_dir=None,
 
     km2 = (config.CELL / 1000.0) ** 2
     stats = {
-        "rain_factor": rain_factor,
+        "factor": factor,
         "high_risk_fraction": float(high.mean()),
         "high_risk_km2": float(high.sum() * km2),
         "moderate_risk_fraction": float(moderate.mean()),

@@ -25,8 +25,10 @@ def cmd_build_static(args):
 
 def cmd_daily(args):
     from . import bulletin as bl
+    from .discharge import get_discharge
     from .forecast import get_forecast
-    from .fuse import compute_rain_factor, fuse, load_thresholds
+    from .fuse import (compute_discharge_factor, compute_rain_factor, fuse,
+                       load_thresholds)
     from .observation import latest_water_extent
 
     if getattr(args, "for_date", None):
@@ -44,8 +46,15 @@ def cmd_daily(args):
     thresholds = load_thresholds()
     forecast = get_forecast(valid_date=valid.date())
     rain_factor = compute_rain_factor(forecast, thresholds)
-    observation = latest_water_extent(valid)          # SAR NOW layer (or None)
-    stats = fuse(rain_factor, valid, observation=observation)
+    discharge = get_discharge(valid_date=valid.date())        # GloFAS (or None)
+    discharge_factor = compute_discharge_factor(discharge, thresholds)
+    factor = max(rain_factor, discharge_factor)               # coupling: higher drives
+    observation = latest_water_extent(valid)                  # SAR NOW layer (or None)
+    stats = fuse(factor, valid, observation=observation)
+    stats.update(rain_factor=rain_factor, discharge_factor=discharge_factor,
+                 discharge=discharge,
+                 driver=("discharge" if discharge_factor >= rain_factor
+                         and discharge_factor > 0 else "rain"))
 
     text, payload = bl.build(issue, valid, forecast, thresholds, stats, observation)
     txt_path, json_path = bl.write(text, payload, config.OUTPUT_DIR, valid)

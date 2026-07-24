@@ -30,7 +30,8 @@ Sentinel-1 scene over the reach.
 All data sources are free and unauthenticated: Copernicus DEM (AWS), JRC
 Global Surface Water (GCS), CHIRPS (IRI Data Library),
 Sen1Floods11 (GCS), Sentinel-1 GRD (Microsoft Planetary Computer, anonymous
-SAS signing), Open-Meteo (GFS global + multi-model blend forecasts).
+SAS signing), Open-Meteo (GFS global + multi-model blend forecasts; GloFAS river
+discharge via the Flood API).
 
 ## Quickstart (local)
 
@@ -154,7 +155,12 @@ re-run **Rebuild static products**.
    (all-weather), and fuse the observed water into the risk index.~~ **Done.**
    Next: a calibrated Sentinel-1 RTC input, and a wider/mosaicked S1 footprint
    so the observation floors risk across the whole window, not just the reach.
-2. **GloFAS coupling** — discharge percentile as a second factor with routing lag.
+2. ~~**GloFAS coupling** — discharge percentile as a second factor with routing lag.~~
+   **Done.** River discharge (GloFAS via Open-Meteo's keyless Flood API) becomes a
+   second factor; risk uses `max(rain_factor, discharge_factor)`, so the routed
+   upstream flood wave (which crests days after the rain) drives risk when it
+   exceeds local rainfall. Verified on Cyclone Freddy: 2023-03-01 reads HIGH
+   (discharge 15,345 m³/s vs. 826 P95) although rain alone was only moderate.
 3. ~~**Multi-window mosaic** — full lower-basin coverage.~~ **Done** for a 2×2
    tile window (lower Limpopo floodplain). Next: larger extent via chunked
    inference + spatially-varying rain factor.
