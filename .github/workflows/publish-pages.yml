@@ -30,9 +30,11 @@ concurrency:
 env:
   SITE_URL: https://zolokiala.github.io/limpopo-flood-risk
   BACKFILL_DAYS: "14"
-  # Fixed historical flood events to keep in the archive (Cyclone Freddy's
-  # first Mozambique landfall, Feb 2023, drove heavy rain over the reach).
-  EVENT_DATES: "2023-02-24 2023-02-25 2023-02-26 2023-02-27 2023-02-28 2023-03-01 2023-03-02"
+  REGIONS: "lower_limpopo caprivi"
+  # Fixed historical flood events per region (Cyclone Freddy's first Mozambique
+  # landfall, Feb 2023, over the Limpopo reach). Caprivi has none pinned yet.
+  EVENTS_lower_limpopo: "2023-02-24 2023-02-25 2023-02-26 2023-02-27 2023-02-28 2023-03-01 2023-03-02"
+  EVENTS_caprivi: ""
 
 jobs:
   publish:
@@ -60,44 +62,42 @@ jobs:
           restore-keys: |
             static-v1
 
-      - name: Build static products if missing (cold cache only)
-        run: python -m floodrisk build-static --if-missing
-
-      - name: Carry forward already-published days
-        if: ${{ github.event.inputs.full_rebuild != 'true' }}
+      - name: Build static products if missing (cold cache only, per region)
         run: |
+          for R in $REGIONS; do
+            python -m floodrisk build-static --region "$R" --if-missing
+          done
+
+      - name: Assemble each region (carry-forward + backfill + build-site)
+        run: |
+          FULL="${{ github.event.inputs.full_rebuild }}"
+          TOMORROW=$(date -u -d "tomorrow" +%Y-%m-%d)
           mkdir -p _site
-          if curl -sf "$SITE_URL/manifest.json" -o /tmp/manifest.json; then
-            for d in $(python -c "import json;print('\n'.join(json.load(open('/tmp/manifest.json')).get('dates',[])))"); do
-              if curl -sf "$SITE_URL/$d.html" -o "_site/$d.html"; then
-                echo "carried forward $d"
+          for R in $REGIONS; do
+            RS="_site/$R"; mkdir -p "$RS"
+            # carry forward already-published days for this region
+            if [ "$FULL" != "true" ] && curl -sf "$SITE_URL/$R/manifest.json" -o /tmp/m.json; then
+              for d in $(python -c "import json;print('\n'.join(json.load(open('/tmp/m.json')).get('dates',[])))"); do
+                curl -sf "$SITE_URL/$R/$d.html" -o "$RS/$d.html" && echo "carried $R/$d" || rm -f "$RS/$d.html"
+              done
+            fi
+            # desired dates: recent window + region-specific flood events
+            DATES=""
+            for i in $(seq 0 "$BACKFILL_DAYS"); do
+              DATES="$DATES $(date -u -d "$TOMORROW -${i} days" +%Y-%m-%d)"
+            done
+            eval "EV=\${EVENTS_$R:-}"
+            DATES="$DATES $EV"
+            for D in $DATES; do
+              if [ -f "$RS/$D.html" ]; then
+                echo "have $R/$D"
               else
-                rm -f "_site/$d.html"
+                echo "building $R/$D"
+                python -m floodrisk daily --region "$R" --for "$D" || echo "  (skipped $R/$D)"
               fi
             done
-          else
-            echo "no existing site yet (first run) - everything will be backfilled"
-          fi
-
-      - name: Backfill missing days (recent window + fixed flood events)
-        run: |
-          TOMORROW=$(date -u -d "tomorrow" +%Y-%m-%d)
-          DATES=""
-          for i in $(seq 0 "$BACKFILL_DAYS"); do
-            DATES="$DATES $(date -u -d "$TOMORROW -${i} days" +%Y-%m-%d)"
+            python -m floodrisk build-site --region "$R" --site _site
           done
-          DATES="$DATES $EVENT_DATES"
-          for D in $DATES; do
-            if [ -f "_site/$D.html" ]; then
-              echo "have $D"
-            else
-              echo "building $D"
-              python -m floodrisk daily --for "$D" || echo "  (skipped $D - source unavailable)"
-            fi
-          done
-
-      - name: Assemble site (snapshots + manifest + index)
-        run: python -m floodrisk build-site --site _site
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -92,36 +92,55 @@ def cmd_dashboard(args):
 
 
 def cmd_build_site(args):
-    """Assemble a static site: one dated snapshot per bulletin + manifest + index.
+    """Assemble the static site for one region under <site>/<region>/.
 
-    Renders a nav-enabled snapshot for every bulletin JSON in outputs/ (their
-    GeoTIFFs must be present), preserving any snapshots already in the site dir
-    (e.g. earlier days carried forward from a previous deploy).
+    Renders a nav-enabled snapshot per bulletin in the region's outputs dir
+    (their GeoTIFFs must be present), writes the region manifest, then rebuilds
+    the site-wide regions.json + index redirect by scanning all region dirs.
+    Snapshots already present are preserved (carried forward from a prior deploy).
     """
     from .dashboard import build_dashboard
 
+    region = getattr(args, "region", None) or config.DEFAULT_REGION
     site = Path(args.site)
-    site.mkdir(parents=True, exist_ok=True)
-    for jf in sorted(config.OUTPUT_DIR.glob("bulletin_*.json")):
+    rsite = site / region
+    rsite.mkdir(parents=True, exist_ok=True)
+    for jf in sorted(config.region_output_dir(region).glob("bulletin_*.json")):
         payload = json.loads(jf.read_text(encoding="utf-8"))
-        build_dashboard(payload, site, nav=True,
+        build_dashboard(payload, rsite, nav=True,
                         out_name=f"{payload['valid']}.html", write_png=False)
 
-    dates = sorted(p.stem for p in site.glob("*.html") if p.stem != "index")
+    dates = sorted(p.stem for p in rsite.glob("*.html") if p.stem != "index")
     if not dates:
-        log.error("no snapshots in %s", site)
+        log.error("no snapshots for region '%s' in %s", region, rsite)
         sys.exit(2)
-    latest = dates[-1]
-    (site / "manifest.json").write_text(
-        json.dumps({"dates": dates, "latest": latest}), encoding="utf-8")
-    (site / "index.html").write_text(
-        '<!doctype html><meta charset="utf-8">'
-        f'<meta http-equiv="refresh" content="0; url={latest}.html">'
-        '<title>Limpopo Flood Risk</title>'
-        f'<a href="{latest}.html">Latest flood-risk dashboard</a>',
-        encoding="utf-8")
-    log.info("site: %d dates, latest %s -> %s", len(dates), latest, site)
+    (rsite / "manifest.json").write_text(
+        json.dumps({"dates": dates, "latest": dates[-1]}), encoding="utf-8")
+    log.info("region %s: %d dates, latest %s", region, len(dates), dates[-1])
+    _write_site_index(site)
     print(site / "index.html")
+
+
+def _write_site_index(site):
+    """(Re)write regions.json + the root index redirect from per-region manifests."""
+    regions = []
+    for rname, reg in config.REGIONS.items():
+        mpath = site / rname / "manifest.json"
+        if mpath.exists():
+            m = json.loads(mpath.read_text())
+            regions.append({"name": rname, "title": reg["title"],
+                            "latest": m["latest"]})
+    (site / "regions.json").write_text(json.dumps({"regions": regions}),
+                                       encoding="utf-8")
+    landing = next((r for r in regions if r["name"] == config.DEFAULT_REGION),
+                   regions[0] if regions else None)
+    if landing:
+        url = f"{landing['name']}/{landing['latest']}.html"
+        (site / "index.html").write_text(
+            '<!doctype html><meta charset="utf-8">'
+            f'<meta http-equiv="refresh" content="0; url={url}">'
+            '<title>Southern Africa Flood Risk</title>'
+            f'<a href="{url}">Flood-risk dashboard</a>', encoding="utf-8")
 
 
 def cmd_selftest(args):
@@ -194,6 +213,8 @@ def main():
     p5 = sub.add_parser("build-site",
                         help="assemble dated snapshots + manifest into a site dir")
     p5.add_argument("--site", default="_site", help="output site directory")
+    p5.add_argument("--region", choices=regions, default=config.DEFAULT_REGION,
+                    help="which region to (re)build in the site")
     p5.set_defaults(func=cmd_build_site)
 
     args = parser.parse_args()
