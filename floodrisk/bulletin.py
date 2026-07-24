@@ -11,7 +11,10 @@ def alert_level(factor):
     return "LOW"
 
 
-def build(issue_date, valid_date, forecast, thresholds, stats, observation):
+def build(issue_date, valid_date, forecast, thresholds, stats, observation,
+          region=None):
+    region = region or {}
+    title = region.get("title", "Flood risk")
     level = alert_level(stats["factor"])
     discharge = stats.get("discharge")
     q95 = thresholds.get("discharge_p95_m3s")
@@ -24,17 +27,17 @@ def build(issue_date, valid_date, forecast, thresholds, stats, observation):
         q_line = " River discharge         : unavailable (GloFAS/Flood API)"
     lines = [
         "=" * 62,
-        f" LIMPOPO FLOOD RISK BULLETIN   issued {issue_date:%Y-%m-%d}, "
-        f"valid {valid_date:%Y-%m-%d}",
+        f" FLOOD RISK BULLETIN — {title}",
+        f"   issued {issue_date:%Y-%m-%d}, valid {valid_date:%Y-%m-%d}",
         "=" * 62,
         f" Alert level             : {level}  "
         f"({stats.get('driver', 'rain')}-driven)",
         f" Risk factor (max)       : {stats['factor']:.2f}",
         f" Forecast source         : {forecast['source']}",
         f" Basin rainfall forecast : {forecast['basin_mm']:5.1f} mm/day "
-        f"(95th pct = {thresholds['basin_p95_mm']:.1f})",
+        f"(95th pct = {thresholds.get('basin_p95_mm', 0.0):.1f})",
         f" Floodplain window       : {forecast['window_mm']:5.1f} mm/day "
-        f"(95th pct = {thresholds['window_p95_mm']:.1f})",
+        f"(95th pct = {thresholds.get('window_p95_mm', 0.0):.1f})",
         f" Rain factor             : {stats['rain_factor']:.2f}",
         q_line,
         f" Area at high risk       : {stats['high_risk_fraction']:.1%} "
@@ -66,6 +69,8 @@ def build(issue_date, valid_date, forecast, thresholds, stats, observation):
     payload = {
         "issued": f"{issue_date:%Y-%m-%d}",
         "valid": f"{valid_date:%Y-%m-%d}",
+        "region": {"name": region.get("name"), "title": region.get("title"),
+                   "place": region.get("place")},
         "alert_level": level,
         "forecast": forecast,
         "thresholds": thresholds,

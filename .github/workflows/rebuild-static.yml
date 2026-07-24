@@ -13,6 +13,11 @@ on:
         type: choice
         options: [all, susceptibility, thresholds, sar, discharge]
         default: all
+      region:
+        description: "Which study region to build"
+        type: choice
+        options: [lower_limpopo, caprivi]
+        default: lower_limpopo
 
 permissions:
   contents: read
@@ -44,12 +49,14 @@ jobs:
       - name: Build static products
         run: |
           C="${{ github.event.inputs.component }}"
+          R="${{ github.event.inputs.region }}"
+          R="${R:-lower_limpopo}"
           if [ -n "$C" ] && [ "$C" != "all" ]; then
-            echo "rebuilding only: $C"
-            python -m floodrisk build-static --only "$C"
+            echo "rebuilding only: $C (region $R)"
+            python -m floodrisk build-static --region "$R" --only "$C"
           else
-            echo "full rebuild"
-            python -m floodrisk build-static
+            echo "full rebuild (region $R)"
+            python -m floodrisk build-static --region "$R"
           fi
 
       - name: Save to cache

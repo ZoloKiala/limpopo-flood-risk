@@ -47,7 +47,7 @@ def _get_json(url, params, tries=3):
     raise last
 
 
-def _openmeteo_precip(model, source, valid_date, today):
+def _openmeteo_precip(model, source, valid_date, today, region):
     """Precipitation_sum for ``valid_date`` on a 0.5deg grid via Open-Meteo.
 
     Live (valid_date >= today): forecast API, indexed by the day offset.
@@ -66,8 +66,9 @@ def _openmeteo_precip(model, source, valid_date, today):
         idx = (valid_date - today).days              # 0 = today, 1 = tomorrow
         day_params = {"forecast_days": idx + 1}
 
-    lats = np.arange(config.LAT_MIN, config.LAT_MAX + 0.001, 0.5)
-    lons = np.arange(config.LON_MIN, config.LON_MAX + 0.001, 0.5)
+    lon_min, lon_max, lat_min, lat_max = region["forecast_bbox"]
+    lats = np.arange(lat_min, lat_max + 0.001, 0.5)
+    lons = np.arange(lon_min, lon_max + 0.001, 0.5)
     points = [(la, lo) for la in lats for lo in lons]
 
     values = np.full(len(points), np.nan, dtype="float32")
@@ -92,7 +93,7 @@ def _openmeteo_precip(model, source, valid_date, today):
             values[start + j] = np.nan if val is None else val
 
     grid = values.reshape(len(lats), len(lons))
-    la_m, lo_m = _bbox_indices(lats, lons, config.WINDOW_BBOX)
+    la_m, lo_m = _bbox_indices(lats, lons, region["window_bbox"])
     result = {
         "source": source,
         "basin_mm": float(np.nanmean(grid)),
@@ -104,12 +105,13 @@ def _openmeteo_precip(model, source, valid_date, today):
     return result
 
 
-def get_forecast(valid_date=None, today=None):
+def get_forecast(valid_date=None, today=None, region=None):
     """Best-available precipitation forecast for ``valid_date`` with provenance.
 
     Primary: GFS global via Open-Meteo. Fallback: Open-Meteo default blend.
     ``valid_date``/``today`` are ``datetime.date`` (default: tomorrow / today UTC).
     """
+    reg = config.get_region(region)
     today = today or dt.datetime.now(dt.timezone.utc).date()
     valid_date = valid_date or (today + dt.timedelta(days=1))
     historical = valid_date < today
@@ -121,7 +123,7 @@ def get_forecast(valid_date=None, today=None):
     )
     for model, source in sources:
         try:
-            return _openmeteo_precip(model, source, valid_date, today)
+            return _openmeteo_precip(model, source, valid_date, today, reg)
         except Exception as e:  # noqa: BLE001 - try the next source
             log.warning("forecast source '%s' failed: %s", source, e)
     raise RuntimeError(f"no forecast source reachable for {valid_date}")

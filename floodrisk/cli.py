@@ -20,7 +20,8 @@ log = logging.getLogger("floodrisk")
 
 def cmd_build_static(args):
     from .static_build import build_static
-    build_static(only_missing=args.if_missing, only=getattr(args, "only", None))
+    build_static(region=getattr(args, "region", None),
+                 only_missing=args.if_missing, only=getattr(args, "only", None))
 
 
 def cmd_daily(args):
@@ -31,6 +32,12 @@ def cmd_daily(args):
                        load_thresholds)
     from .observation import latest_water_extent
 
+    region = getattr(args, "region", None)
+    reg = config.get_region(region)
+    rdir = config.region_static_dir(region)
+    odir = config.region_output_dir(region)
+    odir.mkdir(parents=True, exist_ok=True)
+
     if getattr(args, "for_date", None):
         valid = dt.datetime.strptime(args.for_date, "%Y-%m-%d").replace(
             tzinfo=dt.timezone.utc)
@@ -39,33 +46,36 @@ def cmd_daily(args):
         issue = dt.datetime.now(dt.timezone.utc)
         valid = issue + dt.timedelta(days=1)
 
-    if not (config.STATIC_DIR / "susceptibility.tif").exists():
-        log.error("static products missing - run `python -m floodrisk build-static`")
+    if not (rdir / "susceptibility.tif").exists():
+        log.error("static products missing for region '%s' - run "
+                  "`python -m floodrisk build-static --region %s`",
+                  reg["name"], reg["name"])
         sys.exit(2)
 
-    thresholds = load_thresholds()
-    forecast = get_forecast(valid_date=valid.date())
+    thresholds = load_thresholds(region=region)
+    forecast = get_forecast(valid_date=valid.date(), region=region)
     rain_factor = compute_rain_factor(forecast, thresholds)
-    discharge = get_discharge(valid_date=valid.date())        # GloFAS (or None)
+    discharge = get_discharge(valid_date=valid.date(), region=region)   # GloFAS or None
     discharge_factor = compute_discharge_factor(discharge, thresholds)
     factor = max(rain_factor, discharge_factor)               # coupling: higher drives
-    observation = latest_water_extent(valid)                  # SAR NOW layer (or None)
-    stats = fuse(factor, valid, observation=observation)
+    observation = latest_water_extent(valid, output_dir=odir, region=region)
+    stats = fuse(factor, valid, observation=observation, output_dir=odir, region=region)
     stats.update(rain_factor=rain_factor, discharge_factor=discharge_factor,
                  discharge=discharge,
                  driver=("discharge" if discharge_factor >= rain_factor
                          and discharge_factor > 0 else "rain"))
 
-    text, payload = bl.build(issue, valid, forecast, thresholds, stats, observation)
-    txt_path, json_path = bl.write(text, payload, config.OUTPUT_DIR, valid)
+    text, payload = bl.build(issue, valid, forecast, thresholds, stats, observation,
+                             region=reg)
+    txt_path, json_path = bl.write(text, payload, odir, valid)
     print(text)
     log.info("wrote %s and %s", txt_path, json_path)
 
     from .dashboard import build_dashboard
-    build_dashboard(payload, config.OUTPUT_DIR)
+    build_dashboard(payload, odir)
 
     # Non-zero-ish signal for CI: expose the alert level for downstream steps
-    (config.OUTPUT_DIR / "ALERT_LEVEL").write_text(payload["alert_level"])
+    (odir / "ALERT_LEVEL").write_text(payload["alert_level"])
 
 
 def cmd_dashboard(args):
@@ -153,6 +163,8 @@ def main():
     parser = argparse.ArgumentParser(prog="floodrisk")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    regions = list(config.REGIONS)
+
     p1 = sub.add_parser("build-static", help="train susceptibility + thresholds")
     p1.add_argument("--if-missing", action="store_true",
                     help="skip if static products already exist")
@@ -160,12 +172,16 @@ def main():
                     choices=["susceptibility", "thresholds", "sar", "discharge"],
                     help="build only this component (others must already exist); "
                          "'discharge' injects the GloFAS P95 into thresholds.json")
+    p1.add_argument("--region", choices=regions, default=config.DEFAULT_REGION,
+                    help="which study region to build")
     p1.set_defaults(func=cmd_build_static)
 
     p2 = sub.add_parser("daily", help="produce a risk GeoTIFF + bulletin")
     p2.add_argument("--for", dest="for_date", metavar="YYYY-MM-DD",
                     help="produce the product valid for this date "
                          "(past dates use the historical-forecast archive)")
+    p2.add_argument("--region", choices=regions, default=config.DEFAULT_REGION,
+                    help="which study region")
     p2.set_defaults(func=cmd_daily)
 
     p3 = sub.add_parser("selftest", help="quick sanity check")

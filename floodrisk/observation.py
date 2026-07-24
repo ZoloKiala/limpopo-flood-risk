@@ -61,12 +61,13 @@ def _write_now_map(prob, water, transform, crs, date, output_dir):
     return out
 
 
-def latest_water_extent(date=None, output_dir=None):
+def latest_water_extent(date=None, output_dir=None, region=None):
     """Open-water fraction in the monitored reach from the latest S1 scene."""
     global _MODEL
+    reg = config.get_region(region)
     date = date or dt.datetime.now(dt.timezone.utc)
     output_dir = output_dir or config.OUTPUT_DIR
-    lon, lat = config.NOW_POINT
+    lon, lat = reg["now_point"]
 
     if _MODEL is None:
         _MODEL = sar.load_model(config.STATIC_DIR / "sar_model.weights.h5")

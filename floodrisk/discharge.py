@@ -15,11 +15,12 @@ from .forecast import _get_json        # shared retry+backoff GET
 log = logging.getLogger(__name__)
 
 
-def get_discharge(valid_date=None, today=None):
+def get_discharge(valid_date=None, today=None, region=None):
     """River discharge (m3/s) at the gauge point for ``valid_date`` (or None)."""
+    reg = config.get_region(region)
     today = today or dt.datetime.now(dt.timezone.utc).date()
     valid_date = valid_date or (today + dt.timedelta(days=1))
-    lon, lat = config.DISCHARGE_POINT
+    lon, lat = reg["discharge_point"]
 
     params = {"latitude": lat, "longitude": lon,
               "daily": "river_discharge", "timezone": "UTC"}

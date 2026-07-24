@@ -60,12 +60,15 @@ def _dem_tokens(bbox):
     return tokens
 
 
-def build_susceptibility(static_dir):
+def build_susceptibility(region=None):
+    reg = config.get_region(region)
+    static_dir = config.region_static_dir(region)
+    static_dir.mkdir(parents=True, exist_ok=True)
     tile = config.TILE
     from rasterio.merge import merge
     from rasterio.transform import array_bounds
 
-    tokens = _dem_tokens(config.MOSAIC_BBOX)
+    tokens = _dem_tokens(reg["mosaic_bbox"])
     log.info("mosaicking %d DEM tiles: %s", len(tokens), ", ".join(tokens))
     srcs = []
     for tok in tokens:
@@ -98,7 +101,7 @@ def build_susceptibility(static_dir):
     log.info("ocean pixels: %.2f%%", 100 * ocean.mean())
 
     log.info("streaming GSW occurrence over the mosaic ...")
-    with rasterio.open(config.GSW_URL) as src:
+    with rasterio.open(reg["gsw_url"]) as src:
         occ = src.read(1, window=from_bounds(*bounds, src.transform),
                        out_shape=(h, w),
                        resampling=rasterio.enums.Resampling.nearest)
@@ -156,13 +159,17 @@ def build_susceptibility(static_dir):
     log.info("wrote %s (%d x %d)", out, w, h)
 
 
-def build_thresholds(static_dir):
+def build_thresholds(region=None):
     """Historical rainfall percentiles from CHIRPS (basin + floodplain window)."""
-    import pandas as pd
     import xarray as xr
 
+    reg = config.get_region(region)
+    static_dir = config.region_static_dir(region)
+    static_dir.mkdir(parents=True, exist_ok=True)
+    fb = reg["forecast_bbox"]                      # lon_min, lon_max, lat_min, lat_max
+
     log.info("downloading CHIRPS record (~50 MB) ...")
-    path = _get_file("chirps_limpopo_daily.nc", config.CHIRPS_URL)
+    path = _get_file(f"chirps_{reg['name']}_daily.nc", config.chirps_url(fb))
     try:
         ds = xr.open_dataset(path)
     except Exception:
@@ -170,11 +177,11 @@ def build_thresholds(static_dir):
     ds = ds.sortby("Y", ascending=False)
     rain = np.nan_to_num(ds["prcp"].values.astype("float32"), nan=0.0)
 
-    lon_min, lon_max, lat_min, lat_max = config.WINDOW_BBOX
-    c0 = int((lon_min - config.LON_MIN) / 0.25)
-    c1 = int((lon_max - config.LON_MIN) / 0.25)
-    r0 = int((config.LAT_MAX - lat_max) / 0.25)
-    r1 = int((config.LAT_MAX - lat_min) / 0.25)
+    wlon_min, wlon_max, wlat_min, wlat_max = reg["window_bbox"]
+    c0 = int((wlon_min - fb[0]) / 0.25)
+    c1 = int((wlon_max - fb[0]) / 0.25)
+    r0 = int((fb[3] - wlat_max) / 0.25)            # fb[3] = lat_max = grid top
+    r1 = int((fb[3] - wlat_min) / 0.25)
 
     basin = rain.mean(axis=(1, 2))
     window = rain[:, r0:r1, c0:c1].mean(axis=(1, 2))
@@ -190,10 +197,10 @@ def build_thresholds(static_dir):
     }
     (static_dir / "thresholds.json").write_text(json.dumps(thresholds, indent=2))
     log.info("thresholds: %s", thresholds)
-    build_discharge_baseline(static_dir)
+    build_discharge_baseline(region)
 
 
-def build_discharge_baseline(static_dir):
+def build_discharge_baseline(region=None):
     """Add/refresh the GloFAS discharge P95 in thresholds.json (no CHIRPS needed).
 
     Merges into an existing thresholds.json so it can run standalone
@@ -201,9 +208,12 @@ def build_discharge_baseline(static_dir):
     """
     from .forecast import _get_json
 
+    reg = config.get_region(region)
+    static_dir = config.region_static_dir(region)
+    static_dir.mkdir(parents=True, exist_ok=True)
     path = static_dir / "thresholds.json"
     thresholds = json.loads(path.read_text()) if path.exists() else {}
-    lon, lat = config.DISCHARGE_POINT
+    lon, lat = reg["discharge_point"]
     try:
         dj = _get_json(config.FLOOD_API_URL, {
             "latitude": lat, "longitude": lon, "daily": "river_discharge",
@@ -276,8 +286,10 @@ def _prepare_split(name):
     return np.concatenate(xs), np.concatenate(ys)
 
 
-def build_sar_model(static_dir):
-    """Train the SAR water-segmentation ViT on Sen1Floods11 hand-labeled chips."""
+def build_sar_model(static_dir=None):
+    """Train the SAR water-segmentation ViT on Sen1Floods11 (region-independent)."""
+    static_dir = static_dir or config.STATIC_DIR
+    static_dir.mkdir(parents=True, exist_ok=True)
     log.info("preparing Sen1Floods11 chips (downloads ~0.8 GB, cached) ...")
     Xtr, Ytr = _prepare_split("train")
     Xva, Yva = _prepare_split("valid")
@@ -314,24 +326,29 @@ def build_sar_model(static_dir):
     log.info("SAR model provenance: %s", provenance)
 
 
-def build_static(static_dir=None, only_missing=False, only=None):
-    """Build the static products. ``only`` limits to one component
-    (susceptibility|thresholds|sar), leaving the others as-is (must already
-    exist, e.g. restored from cache)."""
-    static_dir = static_dir or config.STATIC_DIR
-    static_dir.mkdir(parents=True, exist_ok=True)
+def build_static(region=None, only_missing=False, only=None):
+    """Build the static products for a region. ``only`` limits to one component
+    (susceptibility|thresholds|sar|discharge), leaving the others as-is (must
+    already exist, e.g. restored from cache). Susceptibility + thresholds are
+    per-region (STATIC_DIR/<region>, or root for the default region); the SAR
+    model is region-independent and lives at STATIC_DIR root."""
+    rdir = config.region_static_dir(region)
+    rdir.mkdir(parents=True, exist_ok=True)
     if only == "discharge":            # inject discharge P95 without touching CHIRPS
-        build_discharge_baseline(static_dir)
+        build_discharge_baseline(region)
         return
     steps = [
-        ("susceptibility", "susceptibility.tif", build_susceptibility),
-        ("thresholds", "thresholds.json", build_thresholds),
-        ("sar", "sar_model.weights.h5", build_sar_model),
+        ("susceptibility", rdir / "susceptibility.tif",
+         lambda: build_susceptibility(region)),
+        ("thresholds", rdir / "thresholds.json",
+         lambda: build_thresholds(region)),
+        ("sar", config.STATIC_DIR / "sar_model.weights.h5",
+         lambda: build_sar_model(config.STATIC_DIR)),
     ]
-    for name, fname, fn in steps:
+    for name, fpath, fn in steps:
         if only and name != only:
             continue
-        if only_missing and (static_dir / fname).exists():
+        if only_missing and fpath.exists():
             log.info("%s present - skipping", name)
             continue
-        fn(static_dir)
+        fn()

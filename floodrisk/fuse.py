@@ -13,9 +13,15 @@ log = logging.getLogger(__name__)
 
 
 def compute_rain_factor(forecast, thresholds):
-    """How exceptional is tomorrow's rain vs the historical 95th percentile?"""
+    """How exceptional is tomorrow's rain vs the historical 95th percentile?
+
+    Returns 0.0 if no CHIRPS baseline exists (e.g. a region with no rain
+    thresholds yet) so risk degrades to discharge-only."""
+    bp95, wp95 = thresholds.get("basin_p95_mm"), thresholds.get("window_p95_mm")
+    if not bp95 or not wp95:
+        return 0.0
     value = 0.5 * (forecast["basin_mm"] + forecast["window_mm"])
-    p95 = 0.5 * (thresholds["basin_p95_mm"] + thresholds["window_p95_mm"])
+    p95 = 0.5 * (bp95 + wp95)
     return float(np.clip(value / max(p95, 1e-6), 0.0, config.RAIN_FACTOR_CAP))
 
 
@@ -66,8 +72,8 @@ def _observed_water_on_grid(observation, profile):
 
 
 def fuse(factor, valid_date, observation=None, static_dir=None,
-         output_dir=None):
-    static_dir = static_dir or config.STATIC_DIR
+         output_dir=None, region=None):
+    static_dir = static_dir or config.region_static_dir(region)
     output_dir = output_dir or config.OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -129,6 +135,6 @@ def fuse(factor, valid_date, observation=None, static_dir=None,
     return stats
 
 
-def load_thresholds(static_dir=None):
-    static_dir = static_dir or config.STATIC_DIR
+def load_thresholds(static_dir=None, region=None):
+    static_dir = static_dir or config.region_static_dir(region)
     return json.loads((static_dir / "thresholds.json").read_text())

@@ -1,45 +1,88 @@
-"""Central configuration for the Limpopo flood-risk pipeline."""
+"""Central configuration for the (multi-region) flood-risk pipeline."""
 from pathlib import Path
 
 # ---------------------------------------------------------------- paths
 STATIC_DIR = Path("static")     # one-time products (cached between runs)
 OUTPUT_DIR = Path("outputs")    # daily products
 
-# ------------------------------------------------------- basin (WHEN grid)
-LON_MIN, LON_MAX = 26.0, 35.0
-LAT_MIN, LAT_MAX = -26.0, -20.0
-
-# ----------------------------------------- susceptibility mosaic (WHERE)
-# Lower Limpopo floodplain, covered by a grid of Copernicus GLO-30 1-deg DEM
-# tiles mosaicked into one susceptibility raster. A tile is named by its SW
-# corner degree: "S{|lat|}_00_E{lon}_00" spans [lat, lat+1) N, [lon, lon+1) E.
-# build_susceptibility() derives the tile list from MOSAIC_BBOX.
-DEM_TILE_URL = (
-    "https://copernicus-dem-30m.s3.amazonaws.com/"
-    "Copernicus_DSM_COG_10_{tile}_DEM/Copernicus_DSM_COG_10_{tile}_DEM.tif"
-)
-# Copernicus Water Body Mask (0 none, 1 ocean, 2 lake, 3 river) - used to mask
-# the sea out of susceptibility so coastal tiles don't paint risk over water.
-WBM_TILE_URL = (
-    "https://copernicus-dem-30m.s3.amazonaws.com/"
-    "Copernicus_DSM_COG_10_{tile}_DEM/AUXFILES/Copernicus_DSM_COG_10_{tile}_WBM.tif"
-)
-MOSAIC_BBOX = (32.0, 34.0, -26.0, -24.0)   # lon_min, lon_max, lat_min, lat_max
-GSW_URL = (
-    "https://storage.googleapis.com/global-surface-water/"
-    "downloads2021/occurrence/occurrence_30E_20Sv1_4_2021.tif"
-)
-WINDOW_BBOX = (33.0, 34.0, -25.0, -24.0)   # core reach, for the CHIRPS window pct
 TILE = 128
 PATCH = 16
 CELL = 30.0          # ~meters per pixel
 
-# ------------------------------------------------------ CHIRPS (thresholds)
-CHIRPS_URL = (
-    "https://iridl.ldeo.columbia.edu/SOURCES/.UCSB/.CHIRPS/.v2p0/"
-    ".daily-improved/.global/.0p25/.prcp/"
-    f"X/{LON_MIN:g}/{LON_MAX:g}/RANGEEDGES/"
-    f"Y/{LAT_MIN:g}/{LAT_MAX:g}/RANGEEDGES/data.nc"
+GSW_BASE = ("https://storage.googleapis.com/global-surface-water/"
+            "downloads2021/occurrence/occurrence_{tile}v1_4_2021.tif")
+
+
+def chirps_url(bbox):
+    """IRI CHIRPS daily subset URL for a (lon_min, lon_max, lat_min, lat_max) bbox."""
+    lon_min, lon_max, lat_min, lat_max = bbox
+    return ("https://iridl.ldeo.columbia.edu/SOURCES/.UCSB/.CHIRPS/.v2p0/"
+            ".daily-improved/.global/.0p25/.prcp/"
+            f"X/{lon_min:g}/{lon_max:g}/RANGEEDGES/"
+            f"Y/{lat_min:g}/{lat_max:g}/RANGEEDGES/data.nc")
+
+
+# ------------------------------------------------------------- regions
+# Each region is an independent study window: its own DEM mosaic (WHERE), its
+# own forecast/CHIRPS bbox + river gauge (WHEN), and its own SAR reach point.
+# Shared, region-independent settings (models, SAR training, MPC, risk classes)
+# stay module-level below. The default region keeps its products at STATIC_DIR
+# root (unchanged); others live under STATIC_DIR/<name>.
+REGIONS = {
+    "lower_limpopo": {
+        "name": "lower_limpopo",
+        "title": "Lower Limpopo floodplain",
+        "place": "Chókwè · Chibuto · Xai-Xai (Mozambique)",
+        "forecast_bbox": (26.0, 35.0, -26.0, -20.0),
+        "mosaic_bbox": (32.0, 34.0, -26.0, -24.0),
+        "window_bbox": (33.0, 34.0, -25.0, -24.0),
+        "gsw_url": GSW_BASE.format(tile="30E_20S"),
+        "discharge_point": (33.40, -24.70),
+        "now_point": (33.40, -24.70),
+    },
+    "caprivi": {
+        "name": "caprivi",
+        "title": "Caprivi / Eastern Zambezi floodplain",
+        "place": "Katima Mulilo · Zambezi–Chobe (Namibia)",
+        "forecast_bbox": (22.0, 26.0, -19.0, -16.0),
+        "mosaic_bbox": (24.0, 26.0, -19.0, -17.0),
+        "window_bbox": (24.0, 26.0, -18.5, -17.5),
+        "gsw_url": GSW_BASE.format(tile="20E_10S"),
+        "discharge_point": (25.20, -17.80),   # main Zambezi, on the GloFAS network
+        "now_point": (24.30, -17.55),          # Zambezi near Katima Mulilo
+    },
+}
+DEFAULT_REGION = "lower_limpopo"
+
+
+def get_region(name=None):
+    return REGIONS[name or DEFAULT_REGION]
+
+
+def region_static_dir(name=None):
+    """Per-region static dir; the default region stays at STATIC_DIR root."""
+    name = name or DEFAULT_REGION
+    return STATIC_DIR if name == DEFAULT_REGION else STATIC_DIR / name
+
+
+def region_output_dir(name=None):
+    """Per-region daily-output dir; the default region stays at OUTPUT_DIR root."""
+    name = name or DEFAULT_REGION
+    return OUTPUT_DIR if name == DEFAULT_REGION else OUTPUT_DIR / name
+
+
+# ----------------------------------------- susceptibility mosaic (WHERE)
+# Copernicus GLO-30 1-deg DEM tiles are mosaicked per region. A tile is named
+# by its SW corner degree: "S{|lat|}_00_E{lon}_00" spans [lat, lat+1) N,
+# [lon, lon+1) E. build_susceptibility() derives the tile list from the region
+# mosaic_bbox. The WBM aux layer (class 1 = ocean) masks the sea.
+DEM_TILE_URL = (
+    "https://copernicus-dem-30m.s3.amazonaws.com/"
+    "Copernicus_DSM_COG_10_{tile}_DEM/Copernicus_DSM_COG_10_{tile}_DEM.tif"
+)
+WBM_TILE_URL = (
+    "https://copernicus-dem-30m.s3.amazonaws.com/"
+    "Copernicus_DSM_COG_10_{tile}_DEM/AUXFILES/Copernicus_DSM_COG_10_{tile}_WBM.tif"
 )
 
 # ------------------------------------------------------ forecast (Open-Meteo)

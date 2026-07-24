@@ -290,15 +290,19 @@ def _build_subs(payload, output_dir, write_png, interactive, nav=False):
         _tile(q_val, "River discharge", q_sub),
         _tile(f"{risk.get('rain_factor', 0):.2f}", "Rain factor", "rain ÷ P95"),
         _tile(f"{forecast['window_mm']:.1f} <span class=u>mm</span>",
-              "Floodplain rain", f"95th pct {thresholds['window_p95_mm']:.1f} mm"),
+              "Floodplain rain",
+              f"95th pct {thresholds.get('window_p95_mm', 0.0):.1f} mm"),
         _tile(f"{risk['high_risk_km2']:,.0f} <span class=u>km²</span>",
               "High-risk area", f"{risk['high_risk_fraction']:.1%} of window"),
         _tile(f"{risk['moderate_risk_km2']:,.0f} <span class=u>km²</span>",
               "Moderate-risk area", f"{risk['moderate_risk_fraction']:.1%} of window"),
     ])
 
+    region_info = payload.get("region") or {}
     return {
         "valid": payload["valid"], "issued": payload["issued"], "level": level,
+        "title": region_info.get("title") or "Flood Risk",
+        "place": region_info.get("place") or "",
         "color": ALERT_COLOR.get(level, "#64748b"),
         "blurb": ALERT_BLURB.get(level, ""), "tiles": tiles, "map_html": map_html,
         "forecast_source": forecast["source"],
@@ -336,7 +340,8 @@ def build_dashboard(payload, output_dir=None, nav=False, out_name="dashboard.htm
 
     subs = _build_subs(payload, output_dir, write_png=write_png,
                        interactive=True, nav=nav)
-    html = _DOC.format(title_date=subs["valid"], leaflet=_LEAFLET_HEAD,
+    html = _DOC.format(page_title=f"{subs['title']} — {subs['valid']}",
+                       leaflet=_LEAFLET_HEAD,
                        style=_STYLE.format(color=subs["color"]),
                        body=_BODY.format(**subs))
     out = output_dir / out_name
@@ -454,8 +459,8 @@ _STYLE = """<style>
 
 _BODY = """<div class="fr"><div class="wrap">
   <header>
-    <div><h1>Limpopo Flood Risk</h1>
-      <div class="place">Lower Limpopo floodplain · Chibuto reach</div></div>
+    <div><h1>{title}</h1>
+      <div class="place">{place}</div></div>
     <div class="hend">
       {nav_html}
       <div class="dates">valid <b>{valid}</b><br>issued {issued}</div>
@@ -533,7 +538,7 @@ _NAV_SCRIPT = """<script>
 _DOC = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Limpopo Flood Risk — {title_date}</title>
+<title>{page_title}</title>
 {leaflet}
 <style>body {{ margin:0; background:var(--bg); }}</style>
 {style}
