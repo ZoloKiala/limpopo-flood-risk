@@ -86,6 +86,17 @@ def build_susceptibility(static_dir):
     bounds = array_bounds(h, w, transform)          # (left, bottom, right, top)
     log.info("mosaic %d x %d px, extent %s", w, h, tuple(round(b, 3) for b in bounds))
 
+    log.info("mosaicking WBM (ocean mask) ...")
+    wsrcs = [rasterio.open(_get_file(f"wbm_{tok}.tif",
+                                     config.WBM_TILE_URL.format(tile=tok)))
+             for tok in tokens]
+    wbm, _ = merge(wsrcs)
+    for s in wsrcs:
+        s.close()
+    ocean = wbm[0, :h, :w] == 1                      # Copernicus WBM: 1 = ocean
+    del wbm
+    log.info("ocean pixels: %.2f%%", 100 * ocean.mean())
+
     log.info("streaming GSW occurrence over the mosaic ...")
     with rasterio.open(config.GSW_URL) as src:
         occ = src.read(1, window=from_bounds(*bounds, src.transform),
@@ -130,6 +141,7 @@ def build_susceptibility(static_dir):
     suscept = (tf.sigmoid(model.predict(X, batch_size=config.SUS_BATCH))
                .numpy()[..., 0]
                .reshape(ny, nx, tile, tile).swapaxes(1, 2).reshape(h, w))
+    suscept[ocean] = 0.0                             # the sea is not flood-prone land
 
     out = static_dir / "susceptibility.tif"
     with rasterio.open(out, "w", driver="GTiff", height=h, width=w,

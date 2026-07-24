@@ -18,6 +18,12 @@ DEM_TILE_URL = (
     "https://copernicus-dem-30m.s3.amazonaws.com/"
     "Copernicus_DSM_COG_10_{tile}_DEM/Copernicus_DSM_COG_10_{tile}_DEM.tif"
 )
+# Copernicus Water Body Mask (0 none, 1 ocean, 2 lake, 3 river) - used to mask
+# the sea out of susceptibility so coastal tiles don't paint risk over water.
+WBM_TILE_URL = (
+    "https://copernicus-dem-30m.s3.amazonaws.com/"
+    "Copernicus_DSM_COG_10_{tile}_DEM/AUXFILES/Copernicus_DSM_COG_10_{tile}_WBM.tif"
+)
 MOSAIC_BBOX = (32.0, 34.0, -26.0, -24.0)   # lon_min, lon_max, lat_min, lat_max
 GSW_URL = (
     "https://storage.googleapis.com/global-surface-water/"
